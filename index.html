@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#2b2540" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="screen-orientation" content="landscape" />
+    <title>人生模拟 · 婴儿篇</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="gl"></canvas>
+      <div id="touch-layer"></div>
+
+      <!-- HUD -->
+      <div id="hud" class="hidden">
+        <div id="needs"></div>
+        <div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div>
+        <div id="target-label"></div>
+        <div id="hint"></div>
+        <div id="speech"></div>
+        <div id="toasts"></div>
+
+        <div id="task-chip"></div>
+        <button id="board-btn" aria-label="任务"><span class="ico"></span><em id="board-badge"></em></button>
+        <div id="board" class="closed">
+          <div class="board-head">
+            <div>
+              <div class="board-title">成长任务</div>
+              <div class="board-sub">婴儿篇 · Demo 1</div>
+            </div>
+            <div id="board-progress">0 / 7</div>
+          </div>
+          <div class="board-bar"><i id="board-bar-fill"></i></div>
+          <ol id="board-list"></ol>
+          <div class="board-foot">完成全部任务，解锁下一步：扶站</div>
+        </div>
+
+        <div id="joy"><div id="joy-knob"></div><span id="joy-label">爬</span></div>
+        <div id="actions">
+          <button class="act main" data-act="grab"><span class="ico"></span><span class="lbl">抓</span></button>
+          <button class="act" data-act="mouth"><span class="ico"></span><span class="lbl">嘴</span></button>
+          <button class="act" data-act="cry"><span class="ico"></span><span class="lbl">哭</span></button>
+          <button class="act" data-act="laugh"><span class="ico"></span><span class="lbl">笑</span></button>
+        </div>
+        <div id="pc-help">左键/E 抓·放　F 嘴　空格 哭　R 笑　Tab 任务　Esc 释放鼠标</div>
+      </div>
+
+      <!-- Start screen -->
+      <div id="start">
+        <div class="start-card">
+          <div class="start-badge">Demo 1</div>
+          <h1>人生模拟 · 婴儿篇</h1>
+          <p class="start-sub">用宝宝的眼睛，重新看一遍世界</p>
+          <button id="start-btn">轻触开始</button>
+          <p class="start-tip" id="start-tip"></p>
+        </div>
+      </div>
+
+      <!-- End card -->
+      <div id="end" class="hidden">
+        <div class="end-card">
+          <div class="end-emoji" id="end-emoji"></div>
+          <h2>Demo 1 完成</h2>
+          <p class="end-next">下一步：扶站</p>
+          <p class="end-stats" id="end-stats"></p>
+          <div class="end-btns">
+            <button id="end-continue">继续玩耍</button>
+            <button id="end-restart" class="ghost">重新开始</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- rotate prompt -->
+      <div id="rotate">
+        <div class="rot-ico"></div>
+        <p>请把手机横过来玩</p>
+        <small>横屏体验最佳 · 转过来就能继续</small>
+      </div>
+      <div id="fps"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

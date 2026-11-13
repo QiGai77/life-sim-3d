@@ -1,0 +1,31 @@
+{
+  "name": "life-sim-3d",
+  "version": "0.1.0",
+  "description": "第一视角 3D 人生模拟 · 婴儿篇 Demo（three.js）",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/QiGai77/life-sim-3d.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/QiGai77/life-sim-3d/issues"
+  },
+  "homepage": "https://github.com/QiGai77/life-sim-3d#readme",
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8"
+  },
+  "private": true,
+  "type": "module"
+}
