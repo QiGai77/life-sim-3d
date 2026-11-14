@@ -431,3 +431,99 @@ export function beamTex(): THREE.CanvasTexture {
   g.fillRect(0, 0, 64, 128);
   return tex(c);
 }
+
+/** the baby's own face, as seen in the nursery mirror (neutral / laugh / cry) */
+export function babyFace(expr: 'neutral' | 'laugh' | 'cry'): THREE.CanvasTexture {
+  const [c, g] = canvas(256, 320);
+  g.clearRect(0, 0, 256, 320);
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  // onesie shoulders
+  g.fillStyle = '#eef0f7';
+  g.beginPath();
+  g.ellipse(128, 330, 120, 80, 0, Math.PI, 0);
+  g.fill();
+  // ears + head
+  g.fillStyle = '#f6cfb5';
+  g.beginPath();
+  g.ellipse(36, 160, 20, 26, 0, 0, Math.PI * 2);
+  g.ellipse(220, 160, 20, 26, 0, 0, Math.PI * 2);
+  g.fill();
+  const grad = g.createRadialGradient(110, 130, 20, 128, 160, 110);
+  grad.addColorStop(0, '#fbdcc6');
+  grad.addColorStop(1, '#efbfa2');
+  g.fillStyle = grad;
+  g.beginPath();
+  g.ellipse(128, 160, 96, 102, 0, 0, Math.PI * 2);
+  g.fill();
+  // hair tuft
+  g.strokeStyle = '#8a5d44';
+  g.lineWidth = 7;
+  g.beginPath();
+  g.moveTo(118, 64);
+  g.quadraticCurveTo(128, 34, 150, 44);
+  g.quadraticCurveTo(132, 50, 140, 70);
+  g.stroke();
+  // cheeks
+  g.fillStyle = 'rgba(235,130,120,0.35)';
+  g.beginPath();
+  g.ellipse(70, 196, 22, 14, 0, 0, Math.PI * 2);
+  g.ellipse(186, 196, 22, 14, 0, 0, Math.PI * 2);
+  g.fill();
+  g.strokeStyle = '#3e2c22';
+  g.fillStyle = '#3e2c22';
+  g.lineWidth = 6;
+  if (expr === 'neutral') {
+    g.beginPath();
+    g.ellipse(90, 160, 11, 14, 0, 0, Math.PI * 2);
+    g.ellipse(166, 160, 11, 14, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#fff';
+    g.beginPath();
+    g.arc(94, 155, 4, 0, Math.PI * 2);
+    g.arc(170, 155, 4, 0, Math.PI * 2);
+    g.fill();
+    g.beginPath();
+    g.moveTo(112, 218);
+    g.quadraticCurveTo(128, 230, 144, 218);
+    g.stroke();
+  } else if (expr === 'laugh') {
+    g.beginPath();
+    g.moveTo(74, 164);
+    g.quadraticCurveTo(90, 146, 106, 164);
+    g.moveTo(150, 164);
+    g.quadraticCurveTo(166, 146, 182, 164);
+    g.stroke();
+    g.fillStyle = '#9c4a45';
+    g.beginPath();
+    g.moveTo(96, 204);
+    g.quadraticCurveTo(128, 214, 160, 204);
+    g.quadraticCurveTo(156, 256, 128, 256);
+    g.quadraticCurveTo(100, 256, 96, 204);
+    g.fill();
+    g.fillStyle = '#e47d78';
+    g.beginPath();
+    g.ellipse(128, 240, 18, 10, 0, 0, Math.PI * 2);
+    g.fill();
+  } else {
+    g.beginPath();
+    g.moveTo(74, 156);
+    g.quadraticCurveTo(90, 168, 106, 156);
+    g.moveTo(150, 156);
+    g.quadraticCurveTo(166, 168, 182, 156);
+    g.stroke();
+    g.fillStyle = '#9c4a45';
+    g.beginPath();
+    g.ellipse(128, 230, 26, 22, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = 'rgba(150,190,230,0.9)';
+    for (const x of [84, 172]) {
+      g.beginPath();
+      g.moveTo(x, 172);
+      g.quadraticCurveTo(x - 9, 196, x, 204);
+      g.quadraticCurveTo(x + 9, 196, x, 172);
+      g.fill();
+    }
+  }
+  return tex(c);
+}

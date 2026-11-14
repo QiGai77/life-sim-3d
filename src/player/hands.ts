@@ -162,6 +162,8 @@ export class Hands {
   crawlAmt = 0;
   poseTimer = 0;
   scale = 0.9;
+  /** quick shake (rattle) */
+  jiggle = 0;
 
   constructor(camera: THREE.Camera) {
     camera.add(this.group);
@@ -194,6 +196,7 @@ export class Hands {
       if (this.poseTimer <= 0) this.pose = 'idle';
     }
     this.crawlAmt = damp(this.crawlAmt, crawl, 6, dt);
+    this.jiggle = Math.max(0, this.jiggle - dt * 3);
     if (moving) this.crawlPhase += dt * 6.2;
     const t = this.t;
     this.arms.forEach((a, i) => {
@@ -290,6 +293,7 @@ export class Hands {
       _tq.setFromEuler(a.tRot);
       a.root.quaternion.slerp(_tq, 1 - Math.exp(-k * dt));
       a.root.position.copy(a.pos);
+      if (this.jiggle > 0.01 && i === 1) a.root.position.x += Math.sin(t * 46) * 0.018 * this.jiggle;
       // continuous finger curl (relaxed babies keep their fingers a little bent)
       const target = grip ? (this.pose === 'bottle' ? 0.72 : this.pose === 'cry' ? 0.95 : 0.88) : this.pose === 'reach' && i === this.reachSide ? 0.05 : this.pose === 'pet' ? 0.25 : 0.2 + Math.sin(t * 0.9 + i) * 0.05;
       a.curl = damp(a.curl, target, grip ? 14 : 9, dt);

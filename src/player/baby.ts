@@ -26,6 +26,9 @@ export class Baby {
   moving = 0; // 0..1 crawl intensity
   bobPhase = 0;
   shake = 0;
+  bump = 0;
+  /** extra camera roll / tilt for scripted moments (toppling over, dog licks) */
+  tilt = 0;
   private velocity = new THREE.Vector2();
 
   constructor(aspect: number) {
@@ -83,8 +86,15 @@ export class Baby {
       this.velocity.y = damp(this.velocity.y, tz, 6, dt);
       this.pos.x += this.velocity.x * dt;
       this.pos.z += this.velocity.y * dt;
+      const px = this.pos.x, pz = this.pos.z;
       this.resolve(colliders);
+      const pushed = Math.hypot(this.pos.x - px, this.pos.z - pz);
       const sp = this.velocity.length() / this.speed;
+      // crawled head-first into furniture at speed → report a bump (the game makes the baby topple)
+      if (pushed > 0.0035 && sp > 0.75) {
+        this.bump = sp;
+        this.velocity.multiplyScalar(-0.4);
+      }
       this.moving = damp(this.moving, Math.min(1, sp), 8, dt);
       this.bobPhase += dt * (2.0 + sp * 5.5);
     } else {
@@ -99,7 +109,7 @@ export class Baby {
       const sh = this.shake > 0 ? (Math.random() - 0.5) * this.shake : 0;
       this.shake = Math.max(0, this.shake - dt * 0.05);
       this.camera.position.set(this.pos.x, this.eye + bob + breathe + sh, this.pos.z);
-      this.camera.rotation.set(this.pitch + Math.sin(this.bobPhase * 2 + 0.6) * 0.012 * this.moving + sh, this.yaw, this.roll);
+      this.camera.rotation.set(this.pitch + Math.sin(this.bobPhase * 2 + 0.6) * 0.012 * this.moving + sh, this.yaw, this.roll + this.tilt);
     }
   }
 

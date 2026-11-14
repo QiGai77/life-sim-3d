@@ -539,3 +539,112 @@ export function babyBottle(): THREE.Group {
   g.add(milk);
   return g;
 }
+
+/* ================= v2: easter-egg props ================= */
+
+export function tissueBox(): THREE.Group {
+  const g = new THREE.Group();
+  const b = new Builder();
+  b.add(rbox(0.24, 0.1, 0.13, 0.015), '#bccbdb', { pos: [0, 0.05, 0] });
+  b.add(rbox(0.14, 0.012, 0.05, 0.005), '#8fa3bb', { pos: [0, 0.101, 0] });
+  // a few painted dots
+  for (let i = 0; i < 5; i++) b.add(ico(0.008), '#f6efe4', { pos: [-0.09 + i * 0.045, 0.06, 0.066], scale: [1, 1, 0.3] });
+  g.add(b.mesh());
+  const tb = new Builder('fabric');
+  tb.add(new THREE.SphereGeometry(0.04, 14, 10), '#ffffff', { pos: [0, 0.125, 0], scale: [1.1, 0.8, 0.45], rot: [0, 0, 0.3] });
+  const tuft = tb.mesh(Mat.vcSoft);
+  tuft.name = 'tuft';
+  g.add(tuft);
+  return g;
+}
+
+export function tissueSheet(): THREE.Mesh {
+  const b = new Builder('fabric');
+  b.add(new THREE.IcosahedronGeometry(0.05, 2), '#fbfbfb', { scale: [1.2, 0.35, 1.0], jitter: 0.06, variation: 0.02 });
+  return b.mesh(Mat.vcSoft);
+}
+
+export function remote(): THREE.Group {
+  const g = new THREE.Group();
+  const b = new Builder('plastic');
+  b.add(rbox(0.05, 0.022, 0.17, 0.01), '#5b5f6e', { pos: [0, 0.011, 0] });
+  b.add(cyl(0.008, 0.008, 0.006, 8), '#e05a4f', { pos: [0, 0.024, -0.055] });
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++) b.add(cyl(0.006, 0.006, 0.005, 8), '#d9dce3', { pos: [-0.011 + c * 0.022, 0.024, -0.02 + r * 0.025] });
+  g.add(b.mesh());
+  return g;
+}
+
+export function tvSet(screen: THREE.Texture): THREE.Group {
+  const g = new THREE.Group();
+  const b = new Builder();
+  b.add(rbox(0.86, 0.52, 0.06, 0.02), '#3b3d45', { pos: [0, 0.32, 0], surf: 'plastic' });
+  b.add(cyl(0.02, 0.02, 0.06, 8), '#3b3d45', { pos: [0, 0.04, 0], surf: 'plastic' });
+  b.add(rbox(0.28, 0.02, 0.14, 0.008), '#3b3d45', { pos: [0, 0.01, 0], surf: 'plastic' });
+  g.add(b.mesh());
+  const scr = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.8, 0.46),
+    new THREE.MeshStandardMaterial({ map: screen, emissiveMap: screen, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0, color: '#101114', roughness: 0.15, metalness: 0.1 }),
+  );
+  scr.position.set(0, 0.32, 0.031);
+  scr.name = 'screen';
+  g.add(scr);
+  return g;
+}
+
+export function floorMirror(): THREE.Group {
+  const g = new THREE.Group();
+  const b = new Builder();
+  const w = 0.62, h = 0.86, t = 0.05;
+  b.add(rbox(w + t * 2, t, 0.04, 0.012), C.woodLight, { pos: [0, h + t / 2, 0] });
+  b.add(rbox(w + t * 2, t, 0.04, 0.012), C.woodLight, { pos: [0, t / 2, 0] });
+  for (const s of [-1, 1]) b.add(rbox(t, h, 0.04, 0.012), C.woodLight, { pos: [s * (w / 2 + t / 2), t + h / 2 - t / 2, 0] });
+  g.add(b.mesh());
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h - t), new THREE.MeshStandardMaterial({ color: '#dfe7ee', metalness: 1, roughness: 0.04, envMapIntensity: 1.2 }));
+  glass.position.set(0, t + (h - t) / 2 - t / 2, 0.012);
+  glass.name = 'glass';
+  g.add(glass);
+  return g;
+}
+
+export function musicBox(): THREE.Group {
+  const g = new THREE.Group();
+  const b = new Builder();
+  b.add(rbox(0.2, 0.11, 0.14, 0.012), '#e8a58c', { pos: [0, 0.055, 0] });
+  b.add(rbox(0.21, 0.025, 0.15, 0.01), C.woodLight, { pos: [0, 0.12, 0] });
+  b.add(cyl(0.008, 0.008, 0.05, 8), C.gold, { pos: [0.115, 0.06, 0], rot: [0, 0, Math.PI / 2], surf: 'ceramic' });
+  b.add(rbox(0.012, 0.04, 0.012, 0.004), C.gold, { pos: [0.14, 0.075, 0], surf: 'ceramic' });
+  g.add(b.mesh());
+  const top = new THREE.Group();
+  const tb = new Builder();
+  tb.add(cyl(0.035, 0.035, 0.01, 16), '#f6efe4', { pos: [0, 0, 0] });
+  tb.add(extrude(starShape(0.03, 0.013), 0.012, 0.004), C.yellow, { pos: [0, 0.04, 0], surf: 'plastic' });
+  tb.add(cyl(0.003, 0.003, 0.03, 6), C.gold, { pos: [0, 0.02, 0] });
+  top.add(tb.mesh());
+  top.position.y = 0.138;
+  top.name = 'spinner';
+  g.add(top);
+  return g;
+}
+
+export function rubberDuck(): THREE.Group {
+  const g = new THREE.Group();
+  const b = new Builder('plastic');
+  b.add(new THREE.SphereGeometry(0.045, 20, 14), '#f5cf4b', { pos: [0, 0.04, 0], scale: [1.25, 0.85, 1] });
+  b.add(new THREE.SphereGeometry(0.03, 18, 12), '#f5cf4b', { pos: [0.035, 0.09, 0] });
+  b.add(new THREE.SphereGeometry(0.014, 12, 8), '#e9824a', { pos: [0.064, 0.086, 0], scale: [1.4, 0.6, 1] });
+  for (const s of [-1, 1]) b.add(new THREE.SphereGeometry(0.0055, 8, 6), '#2a1d16', { pos: [0.052, 0.1, s * 0.017] });
+  b.add(new THREE.SphereGeometry(0.02, 12, 8), '#f5cf4b', { pos: [-0.055, 0.06, 0], scale: [1, 0.6, 0.6], rot: [0, 0, 0.5] });
+  g.add(b.mesh());
+  return g;
+}
+
+export function rattle(): THREE.Group {
+  const g = new THREE.Group();
+  const b = new Builder('plastic');
+  b.add(new THREE.SphereGeometry(0.042, 20, 14), '#eab3a6', { pos: [0, 0.13, 0] });
+  b.add(new THREE.TorusGeometry(0.044, 0.007, 8, 24), '#93a98a', { pos: [0, 0.13, 0], rot: [Math.PI / 2, 0, 0] });
+  b.add(cap(0.013, 0.085), '#dcae55', { pos: [0, 0.05, 0] });
+  b.add(new THREE.SphereGeometry(0.02, 14, 10), '#bccbdb', { pos: [0, 0.0, 0] });
+  g.add(b.mesh());
+  return g;
+}

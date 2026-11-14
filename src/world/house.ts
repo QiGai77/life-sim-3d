@@ -422,8 +422,9 @@ export class House {
     const s = 0.13;
     const m = P.letterBlock(letter, idx, s);
     this.place(m, x, s / 2 + 0.012, z, ry);
+    m.userData.letter = letter;
     this.addI({
-      id: `block${letter}`,
+      id: `block${idx}`,
       name: `积木 ${letter}`,
       kind: 'hold',
       obj: m,
@@ -534,12 +535,128 @@ export class House {
     });
 
     // letter blocks
-    this.block('C', 2, 3.05, 0.0, 0.2);
-    this.block('D', 3, 3.3, 0.45, -0.3);
-    this.block('E', 4, 2.95, 0.85, 0.6);
-    this.block('F', 5, 3.55, -0.25, 0.1);
+    this.block('妈', 2, 3.05, 0.0, 0.2);
+    this.block('爸', 3, 3.3, 0.45, -0.3);
+    this.block('妈', 4, 2.95, 0.85, 0.6);
+    this.block('宝', 5, 3.55, -0.25, 0.1);
+    this.buildEggProps();
   }
 
+  /* ---------- v2: easter-egg props ---------- */
+  tissueBox!: THREE.Group;
+  tv!: THREE.Group;
+  tvCanvas!: HTMLCanvasElement;
+  tvTex!: THREE.CanvasTexture;
+  tvOn = false;
+  mirror!: THREE.Group;
+  mirrorFace!: THREE.Mesh;
+  mirrorTex!: Record<'neutral' | 'laugh' | 'cry', THREE.Texture>;
+  musicBox!: THREE.Group;
+  private buildEggProps() {
+    // tissue box on the nursery rug
+    this.tissueBox = P.tissueBox();
+    this.place(this.tissueBox, -1.55, 0.012, 1.2, 0.4);
+    this.addI({ id: 'tissue', name: '纸巾盒', kind: 'pet', obj: this.tissueBox, bottom: 0, radius: 0.14, enabled: true });
+    // remote control on the living-room rug
+    const rc = P.remote();
+    this.place(rc, 2.1, 0.016, -0.5, 0.7);
+    this.addI({ id: 'remote', name: '遥控器', kind: 'hold', obj: rc, bottom: 0.0, radius: 0.08, enabled: true, holdPos: new THREE.Vector3(0.02, -0.16, -0.34), holdRot: new THREE.Euler(0.4, 0.3, 0) });
+    // TV on the sideboard (screen is a live canvas)
+    this.tvCanvas = document.createElement('canvas');
+    this.tvCanvas.width = 256;
+    this.tvCanvas.height = 148;
+    const g = this.tvCanvas.getContext('2d')!;
+    g.fillStyle = '#111216';
+    g.fillRect(0, 0, 256, 148);
+    this.tvTex = new THREE.CanvasTexture(this.tvCanvas);
+    this.tvTex.colorSpace = THREE.SRGBColorSpace;
+    this.tv = P.tvSet(this.tvTex);
+    this.place(this.tv, 5.05, 0.84, 3.24, Math.PI);
+    this.lookable('tv', '电视', this.tv, 5);
+    // low floor mirror in the nursery
+    this.mirror = P.floorMirror();
+    this.place(this.mirror, -3.6, 0, 2.47, Math.PI);
+    this.mirrorTex = { neutral: T.babyFace('neutral'), laugh: T.babyFace('laugh'), cry: T.babyFace('cry') };
+    this.mirrorFace = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.26, 0.325),
+      new THREE.MeshBasicMaterial({ map: this.mirrorTex.neutral, transparent: true, opacity: 0, depthWrite: false, color: '#f3e9e2' }),
+    );
+    this.mirrorFace.position.set(0, 0.36, 0.02);
+    this.mirrorFace.raycast = () => {};
+    this.mirror.add(this.mirrorFace);
+    this.lookable('mirror', '小镜子', this.mirror, 2.2);
+    this.collide(-3.6, 2.47, 0.36, 0.06);
+    // music box under the nursery window
+    this.musicBox = P.musicBox();
+    this.place(this.musicBox, -2.95, 0.012, -2.05, 0.3);
+    this.addI({ id: 'musicbox', name: '音乐盒', kind: 'pet', obj: this.musicBox, bottom: 0, radius: 0.13, enabled: true });
+    // rubber duck peeking out from under the sofa
+    const duck = P.rubberDuck();
+    this.place(duck, 5.84, 0, -0.5, -2.4);
+    this.addI({ id: 'duck', name: '小黄鸭', kind: 'hold', obj: duck, bottom: 0.0, radius: 0.08, enabled: true, holdPos: new THREE.Vector3(0, -0.18, -0.34), holdRot: new THREE.Euler(0.1, -1.4, 0) });
+    // rattle in the crib, by the pillow
+    const rt = P.rattle();
+    const cp = LAYOUT.crib;
+    this.place(rt, cp.x - 0.18, 0.5, cp.z - 0.32, 0.4);
+    rt.rotation.z = Math.PI / 2 - 0.2;
+    this.addI({ id: 'rattle', name: '摇铃', kind: 'hold', obj: rt, bottom: 0.02, radius: 0.09, enabled: true, holdPos: new THREE.Vector3(0.05, -0.12, -0.32), holdRot: new THREE.Euler(0.5, 0, -0.2) });
+    this.blob(-1.55, 1.2, 0.36, 0.26, 0.35, 0.02);
+    this.blob(-2.95, -2.05, 0.32, 0.26, 0.35, 0.017);
+  }
+
+  /** little cartoon on the TV (drawn at ~12 fps while it's on) */
+  private tvT = 0;
+  private tvAcc = 0;
+  updateTV(dt: number) {
+    const mat = (this.tv.getObjectByName('screen') as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    mat.emissiveIntensity = THREE.MathUtils.damp(mat.emissiveIntensity, this.tvOn ? 1.25 : 0, 6, dt);
+    if (!this.tvOn) return;
+    this.tvT += dt;
+    this.tvAcc += dt;
+    if (this.tvAcc < 1 / 12) return;
+    this.tvAcc = 0;
+    const g = this.tvCanvas.getContext('2d')!, t = this.tvT;
+    const sky = g.createLinearGradient(0, 0, 0, 148);
+    sky.addColorStop(0, '#9fc6e6');
+    sky.addColorStop(1, '#e9f2d8');
+    g.fillStyle = sky;
+    g.fillRect(0, 0, 256, 148);
+    g.fillStyle = '#f2c94c';
+    g.beginPath();
+    g.arc(210, 30 + Math.sin(t * 2) * 4, 18, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#8fbf7a';
+    g.beginPath();
+    g.ellipse(70, 160, 140, 50, 0, 0, Math.PI * 2);
+    g.ellipse(220, 165, 120, 45, 0, 0, Math.PI * 2);
+    g.fill();
+    // hopping bunny
+    const x = ((t * 60) % 320) - 30, y = 104 - Math.abs(Math.sin(t * 6)) * 26;
+    g.fillStyle = '#ffffff';
+    g.strokeStyle = '#4b3a2f';
+    g.lineWidth = 2.5;
+    g.beginPath();
+    g.ellipse(x, y, 16, 13, 0, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.beginPath();
+    g.ellipse(x + 13, y - 12, 9, 8, 0, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    for (const o of [-3, 4]) {
+      g.beginPath();
+      g.ellipse(x + 12 + o, y - 28, 3.5, 10, 0.15 * o, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+    }
+    g.fillStyle = '#4b3a2f';
+    g.beginPath();
+    g.arc(x + 16, y - 13, 1.8, 0, Math.PI * 2);
+    g.fill();
+    g.font = '18px WenKai, sans-serif';
+    g.fillText('小兔跳跳', 12, 26);
+    this.tvTex.needsUpdate = true;
+  }
   /* ---------- lights ---------- */
   hemi!: THREE.HemisphereLight;
   sky!: THREE.Mesh;
