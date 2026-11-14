@@ -5,6 +5,7 @@ import * as T from './textures';
 import { C } from './lowpoly';
 import type { AABB, Interactable, Surface } from './types';
 import { assets } from '../core/assets';
+import { Dog } from './dog';
 
 export const H = 2.6; // ceiling height
 const _cA = new THREE.Color();
@@ -95,7 +96,7 @@ export class House {
   interactables: Interactable[] = [];
   mobileHub!: THREE.Group;
   ornaments: THREE.Group[] = [];
-  dog!: P.DogParts;
+  dog!: Dog;
   sun!: THREE.DirectionalLight;
   lampLights: THREE.PointLight[] = [];
   motes!: THREE.Points;
@@ -508,11 +509,11 @@ export class House {
     }
     this.lookable('lwindow', '大窗户', wf, 5);
 
-    // dog
-    this.dog = P.dog();
-    this.dog.root.scale.setScalar(1.2);
-    this.place(this.dog.root, 5.15, 0, -0.1, Math.PI + 0.25);
-    this.collide(5.15, -0.1, 0.5, 0.33);
+    // dog (rigged CC0 Shiba)
+    this.dog = new Dog();
+    this.dog.place(5.15, -0.1, -1.32);
+    this.root.add(this.dog.root);
+    this.colliders.push(this.dog.collider);
     this.addI({ id: 'dog', name: '狗狗', kind: 'pet', obj: this.dog.root, bottom: 0, radius: 0.4, enabled: true });
 
     // ball

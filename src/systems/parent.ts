@@ -1,38 +1,49 @@
 import * as THREE from 'three';
-import { buildParent, type ParentRig } from '../world/parentModel';
-import { damp } from '../core/events';
+import { Human, type HumanStyle, type Overlay } from '../world/human';
+import { assets } from '../core/assets';
 
-const IDLE_SPOTS = [
-  new THREE.Vector3(2.2, 0, 1.6),
-  new THREE.Vector3(4.9, 0, -1.6),
-  new THREE.Vector3(5.1, 0, 2.55),
-  new THREE.Vector3(1.6, 0, -1.2),
-];
 const DOOR_L = new THREE.Vector3(0.75, 0, 0.9);
 const DOOR_N = new THREE.Vector3(-0.75, 0, 0.9);
 
+export const MOM_STYLE: HumanStyle = {
+  height: 1.66,
+  colors: { Skin: '#f1c7a9', White: '#8ea6cf', Grey: '#9a8577', Hair_Blond: '#5b3a2a', Hair_Brown: '#3b2519', Brown: '#22150f', Orange: '#e8dcc8' },
+  knit: ['White'],
+  hair: ['Hair_Blond', 'Hair_Brown'],
+  skin: ['Skin'],
+  eyes: ['Brown'],
+};
+export const DAD_STYLE: HumanStyle = {
+  height: 1.78,
+  colors: { Skin: '#e9bf9f', Skin_Darker: '#d9a988', White: '#f1ece4', LightBlue: '#56657f', Red_Dark: '#c47556', LightBrown: '#9fb391', Eyebrows: '#2c1d14', Hair: '#2f2118', Eye: '#1d130e' },
+  knit: ['LightBrown'],
+  hair: ['Hair', 'Eyebrows'],
+  skin: ['Skin', 'Skin_Darker'],
+  eyes: ['Eye'],
+};
+
 /**
- * Parent AI – a tiny state machine:
+ * Parent AI – a tiny state machine driving a rigged Human:
  * wander → (hears a cry) → walk over → caring action (scripted by the game) → wander.
  */
 export class Parent {
-  rig: ParentRig;
+  human: Human;
   pos = new THREE.Vector3(4.9, 0, -1.6);
   heading = -Math.PI / 2;
   targetHeading = -Math.PI / 2;
   path: THREE.Vector3[] = [];
   speed = 1.25;
   busy = false;
-  walkPhase = 0;
   idleTimer = 4;
-  pose: 'none' | 'hold' | 'wave' | 'reach' = 'none';
+  pose: 'none' | 'hold' | 'wave' | 'reach' | 'dance' | 'peek' | 'tickle' | 'cheer' | 'kneel' = 'none';
+  /** where the eyes go when idle (usually the baby's head) */
+  lookAt: THREE.Vector3 | null = null;
   private arrive: (() => void) | null = null;
-  private blinkT = 2;
   private t = 0;
 
-  constructor(scene: THREE.Scene) {
-    this.rig = buildParent();
-    scene.add(this.rig.root);
+  constructor(scene: THREE.Scene, public name: '妈妈' | '爸爸' = '妈妈', private idleSpots: THREE.Vector3[] = []) {
+    this.human = new Human(assets.gltf[name === '妈妈' ? 'mom' : 'dad'] ?? null, name === '妈妈' ? MOM_STYLE : DAD_STYLE);
+    scene.add(this.human.root);
     this.sync();
   }
 
@@ -88,13 +99,12 @@ export class Parent {
         const step = Math.min(dist, this.speed * dt);
         this.pos.addScaledVector(d, step);
         this.targetHeading = Math.atan2(d.x, d.z);
-        this.walkPhase += dt * 7.5;
       }
-    } else if (!this.busy) {
+    } else if (!this.busy && this.idleSpots.length) {
       this.idleTimer -= dt;
       if (this.idleTimer <= 0) {
         this.idleTimer = 6 + Math.random() * 6;
-        const spot = IDLE_SPOTS[Math.floor(Math.random() * IDLE_SPOTS.length)];
+        const spot = this.idleSpots[Math.floor(Math.random() * this.idleSpots.length)];
         if (spot.distanceTo(this.pos) > 0.5) this.goTo(spot);
       }
     }
@@ -103,50 +113,46 @@ export class Parent {
     dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     this.heading += dh * Math.min(1, dt * 8);
 
-    // animation
-    const r = this.rig;
+    // animation state → clips + procedural overlays
+    const h = this.human;
     const walking = this.path.length > 0;
-    const sw = walking ? Math.sin(this.walkPhase) : 0;
-    r.legL.rotation.x = damp(r.legL.rotation.x, sw * 0.5, 12, dt);
-    r.legR.rotation.x = damp(r.legR.rotation.x, -sw * 0.5, 12, dt);
-    let aL = -sw * 0.4, aR = sw * 0.4, zL = 0.08, zR = -0.08;
-    if (this.pose === 'hold') {
-      aL = aR = -1.15;
-      zL = -0.25;
-      zR = 0.25;
-    } else if (this.pose === 'reach') {
-      aL = aR = -0.9;
-      zL = -0.1;
-      zR = 0.1;
-    } else if (this.pose === 'wave') {
-      aR = -2.7 + Math.sin(this.t * 10) * 0.25;
-      zR = -0.35 + Math.sin(this.t * 10) * 0.25;
+    let overlay: Overlay = 'none';
+    h.kneel = 0;
+    if (walking) h.play(this.speed > 1.45 ? 'Run' : 'Walk', 0.25, false, this.speed > 1.45 ? this.speed / 3.2 : this.speed / 1.2);
+    else if (this.pose === 'wave') h.play('Wave', 0.25);
+    else h.play('Idle', 0.3);
+    if (!walking) {
+      if (this.pose === 'hold') overlay = 'hold';
+      else if (this.pose === 'reach') {
+        overlay = 'reach';
+        h.kneel = 0.7;
+      } else if (this.pose === 'kneel') h.kneel = 0.85;
+      else if (this.pose === 'dance') overlay = 'dance';
+      else if (this.pose === 'peek') {
+        overlay = 'peek';
+        h.kneel = 0.6;
+      } else if (this.pose === 'tickle') {
+        overlay = 'tickle';
+        h.kneel = 0.75;
+      } else if (this.pose === 'cheer') overlay = 'cheer';
     }
-    r.armL.rotation.x = damp(r.armL.rotation.x, aL, 10, dt);
-    r.armR.rotation.x = damp(r.armR.rotation.x, aR, 10, dt);
-    r.armL.rotation.z = damp(r.armL.rotation.z, zL, 10, dt);
-    r.armR.rotation.z = damp(r.armR.rotation.z, zR, 10, dt);
-    r.body.position.y = walking ? Math.abs(Math.cos(this.walkPhase)) * 0.025 : Math.sin(this.t * 1.5) * 0.004;
-    r.head.rotation.z = Math.sin(this.t * 0.8) * 0.05;
-
-    // blink
-    this.blinkT -= dt;
-    if (this.blinkT < 0) {
-      r.faceMat.map = r.faceBlink;
-      if (this.blinkT < -0.14) {
-        r.faceMat.map = r.faceOpen;
-        this.blinkT = 2 + Math.random() * 3;
-      }
-    }
+    h.overlay = overlay;
+    h.lookTarget = this.lookAt;
+    if (this.pose === 'dance' || this.pose === 'cheer') h.setMouth('open');
+    else if (this.pose === 'tickle') h.setMouth('rasp');
+    else if (this.pose === 'peek') h.setMouth('o');
+    else h.setMouth('smile');
     this.sync();
+    h.update(dt);
   }
 
   private sync() {
-    this.rig.root.position.copy(this.pos);
-    this.rig.root.rotation.y = this.heading;
+    this.human.root.position.copy(this.pos);
+    this.human.root.rotation.y = this.heading;
+    this.human.root.updateMatrixWorld(true);
   }
 
   headWorld(out = new THREE.Vector3()) {
-    return this.rig.head.getWorldPosition(out);
+    return this.human.headWorld(out);
   }
 }

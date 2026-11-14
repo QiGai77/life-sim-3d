@@ -6,7 +6,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { sfx } from './audio';
 import { House, LAYOUT } from '../world/house';
 import { babyBottle } from '../world/props';
-import { heartSprite, dogFace } from '../world/textures';
+import { heartSprite } from '../world/textures';
 import type { Interactable } from '../world/types';
 import { Baby } from '../player/baby';
 import { Hands } from '../player/hands';
@@ -33,6 +33,7 @@ export class Game {
   hands: Hands;
   house: House;
   parent: Parent;
+  dad: Parent;
   needs = new Needs();
   tasks = new Tasks();
   ui: UI;
@@ -92,7 +93,11 @@ export class Game {
     this.hands = new Hands(this.baby.camera);
 
     this.house = new House(this.scene, this.mobile ? 'low' : 'high');
-    this.parent = new Parent(this.scene);
+    this.parent = new Parent(this.scene, '妈妈', [new THREE.Vector3(2.2, 0, 1.6), new THREE.Vector3(4.9, 0, -1.6), new THREE.Vector3(5.1, 0, 2.55), new THREE.Vector3(1.6, 0, -1.2)]);
+    this.dad = new Parent(this.scene, '爸爸', [new THREE.Vector3(5.6, 0, -2.4), new THREE.Vector3(3.4, 0, 2.6), new THREE.Vector3(1.8, 0, 2.3), new THREE.Vector3(5.6, 0, 2.2)]);
+    this.dad.teleport(new THREE.Vector3(5.6, 0, -2.4), -2.4);
+    this.dad.speed = 1.0;
+    this.dad.idleTimer = 9;
 
     this.bottle.visible = false;
     this.bottle.position.set(0.03, -0.1, -0.235);
@@ -366,17 +371,17 @@ export class Game {
   private pet(i: Interactable) {
     if (i.id !== 'dog') return;
     this.hands.setPose('pet', 1.5);
-    this.dogAwake = 6;
-    const fm = this.house.dog.faceMat;
-    if (!fm.userData.sleep) fm.userData.sleep = fm.map;
-    fm.map = fm.userData.awake ??= dogFace(true);
+    this.dogAwake = 8;
+    const d = this.house.dog;
+    if (d.state === 'sleep') d.state = 'awake';
     tweens.wait(0.45).then(() => sfx.woof());
-    const head = this.house.dog.head.getWorldPosition(new THREE.Vector3());
+    const head = (d.bones['Head'] ?? d.root).getWorldPosition(new THREE.Vector3());
     this.spawnHearts(head.add(new THREE.Vector3(0, 0.15, 0)), 4);
     this.needs.add('love', 12);
     this.needs.add('curious', 5);
     this.ui.speech('狗狗', '汪～（摇尾巴）', 2);
     tweens.wait(0.9).then(() => this.tasks.complete('dog'));
+    bus.emit('pet', i.id);
   }
 
   /* ================= parent care (cutscenes) ================= */
@@ -432,8 +437,8 @@ export class Game {
     const h = this.parent.heading;
     const f = new THREE.Vector3(Math.sin(h), 0, Math.cos(h));
     const cam = this.baby.camera;
-    const camBase = this.parent.pos.clone().addScaledVector(f, 0.52).setY(1.36);
-    const head = this.parent.pos.clone().setY(1.58);
+    const head = this.parent.headWorld(new THREE.Vector3());
+    const camBase = this.parent.pos.clone().addScaledVector(f, 0.5).setY(head.y - 0.24);
     cam.position.copy(camBase);
     cam.lookAt(head);
     const baseQ = cam.quaternion.clone();
@@ -645,13 +650,11 @@ export class Game {
   private updateDog(dt: number) {
     const d = this.house.dog;
     this.dogAwake = Math.max(0, this.dogAwake - dt);
-    const awake = this.dogAwake > 0;
-    const t = this.time;
-    d.head.rotation.z = lerp(d.head.rotation.z, awake ? 0.22 : -0.25 + Math.sin(t * 0.9) * 0.02, 1 - Math.exp(-4 * dt));
-    d.tail.rotation.y = awake ? 0.6 + Math.sin(t * 16) * 0.6 : 0.6 + Math.sin(t * 0.7) * 0.06;
-    d.body.scale.y = 1 + Math.sin(t * (awake ? 3 : 1.4)) * 0.025;
-    if (!awake && d.faceMat.userData.sleep && d.faceMat.map !== d.faceMat.userData.sleep) d.faceMat.map = d.faceMat.userData.sleep;
+    if (d.state === 'awake' && this.dogAwake <= 0 && !this.dogBusy) d.state = 'sleep';
+    d.lookTarget = this.baby.camera.position;
+    d.update(dt);
   }
+  dogBusy = false;
 
   private spawnHearts(at: THREE.Vector3, n: number) {
     for (let k = 0; k < n; k++) {
@@ -909,7 +912,11 @@ export class Game {
     this.updateBall(dt);
     this.updateDog(dt);
     this.updateHearts(dt);
+    const babyHead = this.baby.camera.position;
+    this.parent.lookAt = this.parent.pos.distanceTo(_v.set(babyHead.x, 0, babyHead.z)) < 5 ? babyHead : null;
+    this.dad.lookAt = this.dad.pos.distanceTo(_v.set(babyHead.x, 0, babyHead.z)) < 4.5 ? babyHead : null;
     this.parent.update(dt);
+    this.dad.update(dt);
     this.house.update(this.time, dt);
     if (this.state === 'play') this.house.setDayPhase(clamp(this.playTime / 720, 0, 1) * 0.85);
     this.outline.update(dt);
@@ -986,6 +993,18 @@ export class Game {
       this.baby.canCrawl = true;
       this.ui.joyLocked(false);
       this.parent.teleport(new THREE.Vector3(5.0, 0, 2.4), -2.2);
+    }
+    if (stage === 'people') {
+      complete(['star', 'milk', 'hug', 'roll']);
+      this.baby.setFloor(new THREE.Vector3(3.0, 0, 1.6), 0);
+      this.baby.yaw = 0.05;
+      this.baby.pitch = 0.32;
+      this.baby.canCrawl = true;
+      this.ui.joyLocked(false);
+      this.parent.teleport(new THREE.Vector3(2.55, 0, 0.3), 0.3);
+      this.dad.teleport(new THREE.Vector3(3.6, 0, 0.0), -0.3);
+      this.parent.idleTimer = this.dad.idleTimer = 999;
+      this.house.dog.place(3.35, 0.75, 0.4);
     }
     if (stage === 'feed') {
       this.parent.teleport(this.standSpot(), 0);

@@ -1,61 +1,147 @@
 import * as THREE from 'three';
-import { Builder, C, Mat } from '../world/lowpoly';
+import { C, paint } from '../world/lowpoly';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { damp } from '../core/events';
 
 export type HandPose = 'idle' | 'crawl' | 'reach' | 'hold' | 'pet' | 'clap' | 'cry' | 'mouth' | 'bottle' | 'hug';
 
-const ico = (r: number, d = 1) => new THREE.IcosahedronGeometry(r, d);
-const cap = (r: number, l: number, s = 6) => new THREE.CapsuleGeometry(r, l, 2, s);
-const cyl = (a: number, b: number, h: number, s = 8) => new THREE.CylinderGeometry(a, b, h, s);
+/**
+ * v2 baby hand: one smooth skinned mesh per hand (1 draw call) with real finger bones,
+ * so the chubby fingers can curl continuously when grabbing. Soft skin: physical material
+ * with pink sheen + a warm "subsurface" wrap term.
+ */
+interface HandRig {
+  mesh: THREE.SkinnedMesh;
+  fingers: { prox: THREE.Bone; dist: THREE.Bone }[];
+  thumb: { a: THREE.Bone; b: THREE.Bone };
+}
 
-/** Builds one chubby low-poly baby hand + forearm + pale sleeve. Fingers point -z, forearm runs +z. */
-function buildHand(side: 1 | -1, grip: boolean): THREE.Mesh {
-  const b = new Builder();
+let skinMat: THREE.MeshPhysicalMaterial | null = null;
+function babySkin() {
+  if (skinMat) return skinMat;
+  skinMat = new THREE.MeshPhysicalMaterial({
+    vertexColors: true,
+    roughness: 0.5,
+    sheen: 0.8,
+    sheenColor: new THREE.Color('#ffb4a0'),
+    sheenRoughness: 0.45,
+    clearcoat: 0.08,
+    clearcoatRoughness: 0.6,
+    envMapIntensity: 0.9,
+  });
+  // cheap subsurface: light wraps around the terminator and picks up a warm red tint
+  skinMat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace(
+      '#include <lights_fragment_end>',
+      `#include <lights_fragment_end>
+      reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.20, 0.06, 0.04) * (0.6 + 0.4 * (1.0 - abs(dot(normal, normalize(vViewPosition)))));`,
+    );
+  };
+  return skinMat;
+}
+
+function part(geo: THREE.BufferGeometry, color: string, bone: number, pos: [number, number, number], rot: [number, number, number] = [0, 0, 0], scale: [number, number, number] = [1, 1, 1], variation = 0.03) {
+  const g = paint(geo, color, { variation, crease: 1.2 });
+  const m = new THREE.Matrix4().compose(new THREE.Vector3(...pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rot)), new THREE.Vector3(...scale));
+  g.applyMatrix4(m);
+  const n = g.getAttribute('position').count;
+  const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    si[i * 4] = bone;
+    sw[i * 4] = 1;
+  }
+  g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+  g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+  return g;
+}
+
+/** Builds one chubby baby hand + forearm + sleeve. Fingers point -z, forearm runs +z, back of hand +y. */
+function buildHand(side: 1 | -1): HandRig {
   const skin = C.skin;
-  const v = 0.035;
-  // palm (chubby, slightly cupped)
-  b.add(new THREE.IcosahedronGeometry(0.04, 2), skin, { pos: [0, 0, 0], scale: [1.12, 0.55, 1.0], variation: v });
-  b.add(new THREE.IcosahedronGeometry(0.028, 1), skin, { pos: [0, 0.004, -0.03], scale: [1.45, 0.6, 0.7], variation: v });
-  // fingers: separate stubby digits in a little fan
-  const lens = [0.024, 0.034, 0.031, 0.022];
+  const parts: THREE.BufferGeometry[] = [];
+  const bones: THREE.Bone[] = [];
+  const root = new THREE.Bone();
+  bones.push(root);
+  const sph = (r: number) => new THREE.SphereGeometry(r, 20, 14);
+  const capg = (r: number, l: number) => new THREE.CapsuleGeometry(r, l, 6, 14);
+  // palm: soft, chubby, slightly cupped + a little fat pad
+  parts.push(part(sph(0.04), skin, 0, [0, 0, 0], [0, 0, 0], [1.13, 0.56, 1.0]));
+  parts.push(part(sph(0.03), skin, 0, [0, 0.003, -0.028], [0, 0, 0], [1.42, 0.62, 0.75]));
+  parts.push(part(sph(0.022), C.skinShade, 0, [-0.03 * side, -0.012, 0.004], [0, 0, 0], [1, 0.7, 1.2]));
+  // wrist crease + chubby forearm with a baby "bracelet" fold
+  parts.push(part(sph(0.034), C.skinShade, 0, [0, -0.004, 0.042], [0, 0, 0], [1.1, 0.86, 0.6]));
+  parts.push(part(capg(0.037, 0.13), skin, 0, [0, -0.006, 0.125], [Math.PI / 2, 0, 0]));
+  parts.push(part(new THREE.CylinderGeometry(0.05, 0.052, 0.035, 24), '#fbfbff', 0, [0, -0.006, 0.2], [Math.PI / 2, 0, 0], [1, 1, 1], 0.02));
+  parts.push(part(new THREE.CylinderGeometry(0.052, 0.06, 0.24, 24), C.sleeve, 0, [0, -0.006, 0.335], [Math.PI / 2, 0, 0], [1, 1, 1], 0.03));
+  // fingers: two bones each
+  const lens = [0.026, 0.035, 0.032, 0.023];
+  const fingers: HandRig['fingers'] = [];
   for (let i = 0; i < 4; i++) {
     const k = i - 1.5;
     const len = lens[side === 1 ? i : 3 - i];
     const x = k * 0.0205 * side;
-    if (grip) {
-      b.add(cap(0.0108, len * 0.5, 7), skin, { pos: [x, -0.016, -0.046], rot: [Math.PI / 2 + 1.35, 0, 0], variation: v });
-    } else {
-      const spread = k * 0.16 * side;
-      b.add(cap(0.0098, len, 7), skin, {
-        pos: [x - Math.sin(spread) * 0.018, 0.003, -0.056 - len * 0.5],
-        rot: [Math.PI / 2 + 0.08, 0, spread],
-        variation: v,
-      });
-      // tiny nail tip highlight
-      b.add(new THREE.IcosahedronGeometry(0.006, 0), '#fde3d6', { pos: [x - Math.sin(spread) * 0.03, 0.009, -0.06 - len * 1.0], scale: [1, 0.4, 1] });
-    }
+    const spread = k * 0.12 * side;
+    const prox = new THREE.Bone();
+    prox.position.set(x, 0.003, -0.05);
+    prox.rotation.y = -spread;
+    root.add(prox);
+    const dist = new THREE.Bone();
+    dist.position.set(0, 0, -len * 0.55);
+    prox.add(dist);
+    bones.push(prox, dist);
+    const pi = bones.length - 2, di = bones.length - 1;
+    // build in bone-aligned space then move into hand space via the bone's rest matrix
+    const r = 0.0102;
+    const mProx = new THREE.Matrix4().compose(prox.position, prox.quaternion, new THREE.Vector3(1, 1, 1));
+    const gp = part(capg(r, len * 0.5), skin, pi, [0, 0, -len * 0.27], [Math.PI / 2, 0, 0]);
+    gp.applyMatrix4(mProx);
+    parts.push(gp);
+    const mDist = mProx.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -len * 0.55));
+    const gd = part(capg(r * 0.95, len * 0.45), skin, di, [0, 0, -len * 0.2], [Math.PI / 2, 0, 0]);
+    gd.applyMatrix4(mDist);
+    parts.push(gd);
+    const gn = part(sph(0.0058), '#fde4d8', di, [0, r * 0.62, -len * 0.42], [0, 0, 0], [1, 0.35, 1.3], 0.01);
+    gn.applyMatrix4(mDist);
+    parts.push(gn);
+    fingers.push({ prox, dist });
   }
-  // thumb (inner side)
-  b.add(cap(0.012, 0.022, 7), skin, {
-    pos: [-0.048 * side, -0.003, -0.016],
-    rot: grip ? [1.2, 0, -0.9 * side] : [1.4, 0, -0.85 * side],
-    variation: v,
-  });
-  // wrist crease + chubby forearm
-  b.add(new THREE.IcosahedronGeometry(0.033, 1), C.skinShade, { pos: [0, -0.004, 0.042], scale: [1.08, 0.85, 0.65], variation: v });
-  b.add(cap(0.037, 0.13, 9), skin, { pos: [0, -0.006, 0.125], rot: [Math.PI / 2, 0, 0], variation: v });
-  // pale cuffed sleeve
-  b.add(cyl(0.05, 0.052, 0.035, 10), '#fbfbff', { pos: [0, -0.006, 0.2], rot: [Math.PI / 2, 0, 0], variation: 0.03 });
-  b.add(cyl(0.052, 0.06, 0.24, 10), C.sleeve, { pos: [0, -0.006, 0.335], rot: [Math.PI / 2, 0, 0], jitter: 0.003, variation: 0.04 });
-  return b.mesh(Mat.vcSoft, false, true);
+  // thumb on the inner side
+  const ta = new THREE.Bone();
+  ta.position.set(-0.04 * side, -0.004, -0.012);
+  ta.rotation.set(0, side * 0.75, side * 0.5);
+  root.add(ta);
+  const tb = new THREE.Bone();
+  tb.position.set(0, 0, -0.02);
+  ta.add(tb);
+  bones.push(ta, tb);
+  const mTa = new THREE.Matrix4().compose(ta.position, ta.quaternion, new THREE.Vector3(1, 1, 1));
+  const g1 = part(capg(0.0125, 0.016), skin, bones.length - 2, [0, 0, -0.01], [Math.PI / 2, 0, 0]);
+  g1.applyMatrix4(mTa);
+  parts.push(g1);
+  const g2 = part(capg(0.0115, 0.012), skin, bones.length - 1, [0, 0, -0.027], [Math.PI / 2, 0, 0]);
+  g2.applyMatrix4(mTa);
+  parts.push(g2);
+
+  const geo = mergeGeometries(parts, false)!;
+  geo.computeBoundingSphere();
+  const mesh = new THREE.SkinnedMesh(geo, babySkin());
+  mesh.add(root);
+  mesh.updateMatrixWorld(true);
+  mesh.bind(new THREE.Skeleton(bones));
+  mesh.castShadow = false;
+  mesh.receiveShadow = true;
+  mesh.frustumCulled = false;
+  return { mesh, fingers, thumb: { a: ta, b: tb } };
 }
 
 const _tq = new THREE.Quaternion();
+const _ax = new THREE.Vector3();
 
 interface Arm {
   root: THREE.Group;
-  open: THREE.Mesh;
-  grip: THREE.Mesh;
+  rig: HandRig;
+  curl: number;
+  thumbBase: THREE.Quaternion;
   pos: THREE.Vector3;
   rot: THREE.Euler;
   tPos: THREE.Vector3;
@@ -81,14 +167,12 @@ export class Hands {
     camera.add(this.group);
     for (const side of [-1, 1] as const) {
       const root = new THREE.Group();
-      const open = buildHand(side, false);
-      const grip = buildHand(side, true);
-      grip.visible = false;
-      root.add(open, grip);
+      const rig = buildHand(side);
+      root.add(rig.mesh);
       root.scale.setScalar(this.scale);
       this.group.add(root);
       this.arms.push({
-        root, open, grip,
+        root, rig, curl: 0.15, thumbBase: rig.thumb.a.quaternion.clone(),
         pos: new THREE.Vector3(side * 0.14, -0.3, -0.25),
         rot: new THREE.Euler(),
         tPos: new THREE.Vector3(),
@@ -206,8 +290,17 @@ export class Hands {
       _tq.setFromEuler(a.tRot);
       a.root.quaternion.slerp(_tq, 1 - Math.exp(-k * dt));
       a.root.position.copy(a.pos);
-      a.open.visible = !grip;
-      a.grip.visible = grip;
+      // continuous finger curl (relaxed babies keep their fingers a little bent)
+      const target = grip ? (this.pose === 'bottle' ? 0.72 : this.pose === 'cry' ? 0.95 : 0.88) : this.pose === 'reach' && i === this.reachSide ? 0.05 : this.pose === 'pet' ? 0.25 : 0.2 + Math.sin(t * 0.9 + i) * 0.05;
+      a.curl = damp(a.curl, target, grip ? 14 : 9, dt);
+      const c = a.curl;
+      a.rig.fingers.forEach((f, fi) => {
+        const lag = 1 - fi * 0.06;
+        f.prox.rotation.x = -c * 1.35 * lag;
+        f.dist.rotation.x = -c * 1.55 * lag;
+      });
+      a.rig.thumb.a.quaternion.copy(a.thumbBase).multiply(_tq.setFromAxisAngle(_ax.set(1, 0, 0), -c * 0.7));
+      a.rig.thumb.b.rotation.x = -c * 0.9;
     });
   }
 }
