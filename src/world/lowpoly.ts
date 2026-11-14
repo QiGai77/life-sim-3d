@@ -1,13 +1,14 @@
 import * as THREE from 'three';
-import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
- * Low-poly helpers.
+ * Procedural model helpers (v2: smooth PBR).
  *
  * Every procedural model is assembled from three.js primitives that are
- *  - slightly jittered (coincident vertices move together, so meshes stay closed)
- *  - split into flat triangles with a tiny per-face colour variation
- *  - baked into one vertex-coloured geometry per object (one draw call)
+ *  - smooth-shaded with creased normals (hard edges stay crisp, round things stay round)
+ *  - vertex-coloured, tagged with a surface type (wood / fabric / fur / plastic …)
+ *  - box-projected UVs so real CC0 detail maps (grain, velvet, fur) can be applied
+ *  - baked into one geometry per object (one draw call)
  */
 
 // deterministic hash → [0,1)
@@ -30,6 +31,7 @@ export function rand(): number {
 }
 
 export function jitter(geo: THREE.BufferGeometry, amount: number, seed = 0): THREE.BufferGeometry {
+  amount *= JITTER_SCALE;
   if (amount <= 0) return geo;
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {
@@ -46,12 +48,23 @@ export function jitter(geo: THREE.BufferGeometry, amount: number, seed = 0): THR
   return geo;
 }
 
+/** v2: props are smooth now – the old low-poly jitter is mostly switched off. */
+export const JITTER_SCALE = 0.15;
+
+/** Surface types, stored per vertex in the `surf` attribute and resolved in one shared PBR shader. */
+export const S = { paint: 0, wood: 1, fabric: 2, fur: 3, plastic: 4, ceramic: 5, leaf: 6, glow: 7 } as const;
+export type SurfName = keyof typeof S;
+
 export interface PaintOpts {
   jitter?: number;
-  variation?: number; // per-face brightness variation
+  variation?: number; // colour variation (now smooth, low-frequency)
   seed?: number;
-  /** optional per-vertex colour function (world/local position → colour) */
+  /** optional per-face colour function (local position → colour) – keeps hard colour edges */
   colorFn?: (p: THREE.Vector3, n: THREE.Vector3) => THREE.Color;
+  /** surface type; auto-detected from the colour when omitted */
+  surf?: SurfName;
+  /** crease angle for smooth normals (radians) */
+  crease?: number;
 }
 
 const _c = new THREE.Color();
@@ -61,34 +74,74 @@ const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _d = new THREE.Vector3();
 
-/** Flat-faceted, vertex-coloured copy of a geometry. Keeps only position/normal/color. */
+const lowNoise = (x: number, y: number, z: number, s: number) =>
+  (Math.sin(x * 6.1 + y * 2.3 + s) * Math.sin(z * 5.3 + x * 1.7 + s * 2.1) + Math.sin(y * 4.7 + z * 3.1 + s * 0.7) * 0.5) / 1.5;
+
+/** Smooth-shaded (creased normals), vertex-coloured copy of a geometry. Keeps position/normal/color. */
 export function paint(src: THREE.BufferGeometry, color: THREE.ColorRepresentation, o: PaintOpts = {}): THREE.BufferGeometry {
   let geo = src.index ? src.toNonIndexed() : src.clone();
   for (const k of Object.keys(geo.attributes)) if (k !== 'position') geo.deleteAttribute(k);
   jitter(geo, o.jitter ?? 0, o.seed ?? 0);
+  geo = toCreasedNormals(geo, o.crease ?? 0.62);
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const cols = new Float32Array(pos.count * 3);
   const base = new THREE.Color(color);
-  const variation = o.variation ?? 0.07;
+  const variation = (o.variation ?? 0.07) * 0.45;
+  const seed = o.seed ?? 0;
+  for (let i = 0; i < pos.count; i += 3) {
+    if (o.colorFn) {
+      _a.fromBufferAttribute(pos, i);
+      _b.fromBufferAttribute(pos, i + 1);
+      _d.fromBufferAttribute(pos, i + 2);
+      _p.copy(_a).add(_b).add(_d).multiplyScalar(1 / 3);
+      _n.subVectors(_d, _b).cross(_a.clone().sub(_b)).normalize();
+      _c.copy(o.colorFn(_p, _n));
+    }
+    for (let k = 0; k < 3; k++) {
+      if (!o.colorFn) _c.copy(base);
+      _p.fromBufferAttribute(pos, i + k);
+      const v = 1 + lowNoise(_p.x, _p.y, _p.z, seed) * variation;
+      cols[(i + k) * 3] = _c.r * v;
+      cols[(i + k) * 3 + 1] = _c.g * v;
+      cols[(i + k) * 3 + 2] = _c.b * v;
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  return geo;
+}
+
+/** world-scale box projection UVs (per triangle, dominant axis) – drives the detail maps */
+export function boxUV(geo: THREE.BufferGeometry) {
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  const uv = new Float32Array(pos.count * 2);
   for (let i = 0; i < pos.count; i += 3) {
     _a.fromBufferAttribute(pos, i);
     _b.fromBufferAttribute(pos, i + 1);
     _d.fromBufferAttribute(pos, i + 2);
-    _p.copy(_a).add(_b).add(_d).multiplyScalar(1 / 3);
-    _n.subVectors(_d, _b).cross(_a.clone().sub(_b)).normalize();
-    if (o.colorFn) _c.copy(o.colorFn(_p, _n));
-    else _c.copy(base);
-    const v = 1 + (hash3(_p.x * 13.1, _p.y * 7.7, _p.z * 5.3, (o.seed ?? 0) + 9) - 0.5) * 2 * variation;
-    _c.multiplyScalar(v);
+    _n.subVectors(_b, _a).cross(_p.subVectors(_d, _a));
+    const ax = Math.abs(_n.x), ay = Math.abs(_n.y), az = Math.abs(_n.z);
     for (let k = 0; k < 3; k++) {
-      cols[(i + k) * 3] = _c.r;
-      cols[(i + k) * 3 + 1] = _c.g;
-      cols[(i + k) * 3 + 2] = _c.b;
+      _p.fromBufferAttribute(pos, i + k);
+      let u, v;
+      if (ax >= ay && ax >= az) (u = _p.z), (v = _p.y);
+      else if (ay >= az) (u = _p.x), (v = _p.z);
+      else (u = _p.x), (v = _p.y);
+      uv[(i + k) * 2] = u;
+      uv[(i + k) * 2 + 1] = v;
     }
   }
-  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-  geo.computeVertexNormals();
-  return geo;
+  geo.setAttribute('buv', new THREE.BufferAttribute(uv, 2));
+}
+
+const WOODS = new Set(['#c99566', '#dcb284', '#9b6a45', '#e6c49c', '#c8a77a', '#b08c5f', '#6e4b3a', '#e2c196', '#d8b27a']);
+const LEAVES = new Set(['#7fae7e', '#4f7d6a', '#5f8f74', '#4f7a66']);
+function autoSurf(color: THREE.ColorRepresentation, fallback: number): number {
+  if (typeof color === 'string') {
+    const c = color.toLowerCase();
+    if (WOODS.has(c)) return S.wood;
+    if (LEAVES.has(c)) return S.leaf;
+  }
+  return fallback;
 }
 
 export interface PartOpts extends PaintOpts {
@@ -97,9 +150,16 @@ export interface PartOpts extends PaintOpts {
   scale?: number | [number, number, number];
 }
 
-/** Collects painted parts and merges them into a single mesh. */
+/** Collects painted parts and merges them into a single mesh (one draw call). */
 export class Builder {
   parts: THREE.BufferGeometry[] = [];
+  /** default surface for parts without an explicit/auto-detected one */
+  def: SurfName | null = null;
+  constructor(def: SurfName | null = null) {
+    this.def = def;
+  }
+  private surfs: (number | null)[] = [];
+  private colors: THREE.ColorRepresentation[] = [];
   private m = new THREE.Matrix4();
   private q = new THREE.Quaternion();
   private e = new THREE.Euler();
@@ -117,6 +177,8 @@ export class Builder {
     this.m.compose(this.t, this.q, this.s);
     g.applyMatrix4(this.m);
     this.parts.push(g);
+    this.surfs.push(o.surf !== undefined ? S[o.surf] : null);
+    this.colors.push(color);
     return this;
   }
 
@@ -125,11 +187,18 @@ export class Builder {
     const c = g.clone();
     if (matrix) c.applyMatrix4(matrix);
     this.parts.push(c);
+    this.surfs.push(null);
+    this.colors.push('#ffffff');
     return this;
   }
 
-  geometry(): THREE.BufferGeometry {
+  geometry(defaultSurf = 0): THREE.BufferGeometry {
     if (!this.parts.length) return new THREE.BufferGeometry();
+    this.parts.forEach((p, i) => {
+      const s = this.surfs[i] ?? autoSurf(this.colors[i], defaultSurf);
+      p.setAttribute('surf', new THREE.BufferAttribute(new Float32Array(p.getAttribute('position').count).fill(s), 1));
+      if (!p.getAttribute('buv')) boxUV(p);
+    });
     const g = mergeGeometries(this.parts, false)!;
     g.computeBoundingSphere();
     g.computeBoundingBox();
@@ -137,26 +206,120 @@ export class Builder {
   }
 
   mesh(mat: THREE.Material = Mat.vc, cast = true, receive = true): THREE.Mesh {
-    const mesh = new THREE.Mesh(this.geometry(), mat);
+    const def = this.def !== null ? S[this.def] : mat === Mat.vcSoft ? S.fabric : mat === Mat.vcGlow ? S.glow : mat === Mat.vcPastel ? S.plastic : S.paint;
+    const mesh = new THREE.Mesh(this.geometry(def), mat);
     mesh.castShadow = cast;
     mesh.receiveShadow = receive;
     return mesh;
   }
 }
 
-/** Shared materials */
-export const Mat = {
-  vc: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.82, metalness: 0 }),
-  vcSoft: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 }),
-  vcPastel: new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.7, metalness: 0, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.12 }),
-  vcGlow: new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    flatShading: true,
-    roughness: 0.6,
-    emissive: new THREE.Color('#ffcf8a'),
-    emissiveIntensity: 2.2,
-  }),
+/* ---------------- shared PBR "surface" material ---------------- */
+
+export interface DetailTex {
+  woodGrain: THREE.Texture;
+  oakNor: THREE.Texture;
+  velvetNor: THREE.Texture;
+  teddyNor: THREE.Texture;
+  furDetail: THREE.Texture;
+}
+
+const SURF_VERT_PARS = /* glsl */ `
+attribute float surf;
+attribute vec2 buv;
+varying float vSurf;
+varying vec2 vBoxUv;
+`;
+const SURF_FRAG_PARS = /* glsl */ `
+varying float vSurf;
+varying vec2 vBoxUv;
+uniform sampler2D tGrain, tOakN, tFabN, tFurN, tFurD;
+uniform float uDetail;
+vec3 surfPerturb(vec3 eye_pos, vec3 surf_norm, vec2 uv, vec3 mapN) {
+  vec3 q0 = dFdx(eye_pos.xyz); vec3 q1 = dFdy(eye_pos.xyz);
+  vec2 st0 = dFdx(uv.st); vec2 st1 = dFdy(uv.st);
+  vec3 N = surf_norm;
+  vec3 q1perp = cross(q1, N); vec3 q0perp = cross(N, q0);
+  vec3 T = q1perp * st0.x + q0perp * st1.x;
+  vec3 B = q1perp * st0.y + q0perp * st1.y;
+  float det = max(dot(T, T), dot(B, B));
+  float scale = (det == 0.0) ? 0.0 : inversesqrt(det);
+  return normalize(T * (mapN.x * scale) + B * (mapN.y * scale) + N * mapN.z);
+}
+`;
+
+/** Patch a MeshStandardMaterial so that one draw call can be wood, fabric, fur, plastic… per vertex. */
+export function surfaceMaterial(tex: DetailTex, params: THREE.MeshStandardMaterialParameters = {}): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0, ...params });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.tGrain = { value: tex.woodGrain };
+    sh.uniforms.tOakN = { value: tex.oakNor };
+    sh.uniforms.tFabN = { value: tex.velvetNor };
+    sh.uniforms.tFurN = { value: tex.teddyNor };
+    sh.uniforms.tFurD = { value: tex.furDetail };
+    sh.uniforms.uDetail = { value: 1 };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\n' + SURF_VERT_PARS)
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n vSurf = surf; vBoxUv = buv;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\n' + SURF_FRAG_PARS)
+      .replace(
+        '#include <color_fragment>',
+        /* glsl */ `#include <color_fragment>
+        int sType = int(vSurf + 0.5);
+        float sRough = roughness; vec3 sN = vec3(0.0, 0.0, 1.0); float sSheen = 0.0; vec2 sUv = vBoxUv;
+        if (sType == 1) {           // wood: real grain modulates the painted colour
+          sUv = vBoxUv * vec2(0.7, 2.2);
+          float g = texture2D(tGrain, sUv).r;
+          diffuseColor.rgb *= mix(1.0, g * 1.12, 0.85);
+          sN = texture2D(tOakN, sUv).xyz * 2.0 - 1.0; sN.xy *= 0.8;
+          sRough = 0.52 + (1.0 - g) * 0.25;
+        } else if (sType == 2) {    // fabric / velvet
+          sUv = vBoxUv * 3.2;
+          sN = texture2D(tFabN, sUv).xyz * 2.0 - 1.0; sN.xy *= 1.1;
+          sRough = 0.92; sSheen = 0.22;
+        } else if (sType == 3) {    // plush fur
+          sUv = vBoxUv * 4.5;
+          diffuseColor.rgb *= mix(1.0, texture2D(tFurD, sUv).r * 1.1, 0.7);
+          sN = texture2D(tFurN, sUv).xyz * 2.0 - 1.0; sN.xy *= 1.4;
+          sRough = 0.98; sSheen = 0.35;
+        } else if (sType == 4) { sRough = 0.32; }
+        else if (sType == 5) { sRough = 0.18; }
+        else if (sType == 6) { sRough = 0.55; sSheen = 0.08; }
+        else if (sType == 7) { sRough = 0.6; }
+        else { sRough = roughness; }
+        `,
+      )
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = sRough;')
+      .replace(
+        '#include <normal_fragment_maps>',
+        /* glsl */ `#include <normal_fragment_maps>
+        if (sType >= 1 && sType <= 3) normal = surfPerturb(-vViewPosition, normal, sUv, normalize(mix(vec3(0.,0.,1.), sN, uDetail)));`,
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        /* glsl */ `#include <emissivemap_fragment>
+        if (sSheen > 0.0) { float fr = 1.0 - abs(dot(normal, normalize(vViewPosition))); totalEmissiveRadiance += diffuseColor.rgb * sSheen * fr * fr * fr * 0.55; }`,
+      );
+  };
+  m.customProgramCacheKey = () => 'surf-v2' + (params.emissive ? '-e' : '');
+  return m;
+}
+
+/** Shared materials – created once the detail textures are loaded (see initMaterials). */
+export const Mat = {} as {
+  vc: THREE.MeshStandardMaterial;
+  vcSoft: THREE.MeshStandardMaterial;
+  vcPastel: THREE.MeshStandardMaterial;
+  vcGlow: THREE.MeshStandardMaterial;
 };
+
+export function initMaterials(tex: DetailTex) {
+  Mat.vc = surfaceMaterial(tex);
+  Mat.vcSoft = surfaceMaterial(tex, { roughness: 0.92 });
+  Mat.vcPastel = surfaceMaterial(tex, { roughness: 0.4, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.05 });
+  Mat.vcGlow = surfaceMaterial(tex, { roughness: 0.6, emissive: new THREE.Color('#ffcf8a'), emissiveIntensity: 2.0 });
+}
 
 // ---------- shape helpers ----------
 

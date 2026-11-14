@@ -4,6 +4,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 
 /**
  * "Baby vision": soft radial edge-blur (cheap fake depth-of-field), warm grade,
@@ -64,12 +65,23 @@ export class Post {
   composer: EffectComposer;
   bloom: UnrealBloomPass;
   vision: ShaderPass;
+  ao: GTAOPass | null = null;
 
   constructor(private renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, mobile: boolean) {
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
     const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: mobile ? 2 : 4 });
     this.composer = new EffectComposer(renderer, rt);
     this.composer.addPass(new RenderPass(scene, camera));
+    // ground-truth AO on desktop GPUs; phones rely on baked contact shadows + edge AO maps instead
+    if (!mobile && !/noao/.test(location.search)) {
+      const ao = new GTAOPass(scene, camera, size.x, size.y);
+      ao.output = GTAOPass.OUTPUT.Default;
+      ao.blendIntensity = 0.85;
+      ao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.5, thickness: 1.2, scale: 1.0, samples: 12 });
+      ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 8 });
+      this.ao = ao;
+      this.composer.addPass(ao);
+    }
     const div = mobile ? 3 : 2;
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / div, size.y / div), 0.5, 0.55, 0.82);
     this.composer.addPass(this.bloom);
@@ -81,6 +93,7 @@ export class Post {
   setSize(w: number, h: number, pr: number) {
     this.composer.setPixelRatio(pr);
     this.composer.setSize(w, h);
+    this.ao?.setSize(w * pr, h * pr);
     this.vision.uniforms.resolution.value.set(w * pr, h * pr);
   }
 

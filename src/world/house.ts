@@ -1,10 +1,14 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import * as P from './props';
 import * as T from './textures';
 import { C } from './lowpoly';
 import type { AABB, Interactable, Surface } from './types';
+import { assets } from '../core/assets';
 
 export const H = 2.6; // ceiling height
+const _cA = new THREE.Color();
+const _cB = new THREE.Color();
 
 export const LAYOUT = {
   nursery: { minX: -5, maxX: 0, minZ: -2.5, maxZ: 2.5 },
@@ -41,7 +45,7 @@ function wallFace(
     us.add(h.u1);
   });
   const cuts = [...us].sort((x, y) => x - y);
-  const pos: number[] = [], uv: number[] = [], nor: number[] = [];
+  const pos: number[] = [], uv: number[] = [], uv1: number[] = [], nor: number[] = [];
   const quad = (u0: number, u1: number, v0: number, v1: number) => {
     const p = (u: number, v: number) => [a[0] + dir.x * u, v, a[1] + dir.y * u];
     const A = p(u0, v0), B = p(u1, v0), Cc = p(u1, v1), D = p(u0, v1);
@@ -56,6 +60,7 @@ function wallFace(
     tris.forEach((t, i) => {
       pos.push(...t);
       uv.push(uvs[i][0] / tile, uvs[i][1] / tile);
+      uv1.push(uvs[i][0] / len, uvs[i][1] / H);
       nor.push(normal.x, normal.y, normal.z);
     });
   };
@@ -75,6 +80,7 @@ function wallFace(
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('uv1', new THREE.Float32BufferAttribute(uv1, 2));
   const m = new THREE.Mesh(geo, mat);
   m.castShadow = true;
   m.receiveShadow = true;
@@ -104,6 +110,8 @@ export class House {
     this.buildLiving();
     this.buildLights();
     this.buildBeams();
+    this.buildContactShadows();
+    this.setDayPhase(0);
     this.root.traverse((o) => {
       if (o.userData.occluder) this.occluders.push(o);
     });
@@ -114,6 +122,27 @@ export class House {
     o.rotation.y = ry;
     this.root.add(o);
     return o;
+  }
+
+  private rugMat(map: THREE.Texture, w: number, d: number) {
+    const n = assets.tex.rugNor.clone();
+    n.repeat.set(w * 2.2, d * 2.2);
+    return new THREE.MeshStandardMaterial({ map, normalMap: n, normalScale: new THREE.Vector2(1.3, 1.3), roughness: 1, color: '#ffffff' });
+  }
+
+  private blobTex = T.blobShadow();
+  /** soft contact shadow under furniture (cheap baked-AO substitute that also works on phones) */
+  blob(x: number, z: number, w: number, d: number, opacity = 0.5, y = 0.017, ry = 0) {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, d),
+      new THREE.MeshBasicMaterial({ map: this.blobTex, transparent: true, depthWrite: false, color: '#2a1a12', opacity, polygonOffset: true, polygonOffsetFactor: -2 }),
+    );
+    m.rotation.set(-Math.PI / 2, 0, ry);
+    m.position.set(x, y, z);
+    m.renderOrder = 1;
+    m.raycast = () => {};
+    this.root.add(m);
+    return m;
   }
 
   private collide(cx: number, cz: number, hw: number, hd: number) {
@@ -129,11 +158,19 @@ export class House {
   /* ---------- walls, floors, ceilings ---------- */
   private buildShell() {
     const { nursery: N, living: L, door, nWindow: NW, lWindow: LW } = LAYOUT;
-    const nurseryMat = new THREE.MeshStandardMaterial({ map: T.nurseryWallpaper(), roughness: 0.95, shadowSide: THREE.DoubleSide });
+    const tx = assets.tex;
+    const wallN = (rep: number) => {
+      const t = tx.wallNor.clone();
+      t.repeat.set(rep, rep);
+      return t;
+    };
+    const wallAO = T.edgeAO(0.42, 0.5, 0.05, 0.07, true);
+    const nurseryMat = new THREE.MeshStandardMaterial({ map: T.nurseryWallpaper(), roughness: 0.88, normalMap: wallN(1.6), normalScale: new THREE.Vector2(0.6, 0.6), aoMap: wallAO, aoMapIntensity: 1, shadowSide: THREE.DoubleSide });
     nurseryMat.map!.repeat.set(1, 1);
-    const livingMat = new THREE.MeshStandardMaterial({ map: T.livingWallpaper(), roughness: 0.95, shadowSide: THREE.DoubleSide });
+    const livingMat = new THREE.MeshStandardMaterial({ map: T.livingWallpaper(), roughness: 0.88, normalMap: wallN(1.4), normalScale: new THREE.Vector2(0.6, 0.6), aoMap: wallAO, aoMapIntensity: 1, shadowSide: THREE.DoubleSide });
     livingMat.map!.repeat.set(1, 1);
-    const ceilMat = new THREE.MeshStandardMaterial({ color: '#fbf4ea', roughness: 1, side: THREE.DoubleSide });
+    const ceilMat = new THREE.MeshStandardMaterial({ color: '#fbf4ea', roughness: 0.95, side: THREE.DoubleSide, aoMap: T.edgeAO(0.35, 0.35, 0.05, 0.05, true), aoMapIntensity: 1 });
+    const floorAO = T.edgeAO(0.45, 0.45, 0.035, 0.035, true);
 
     // nursery walls
     this.root.add(wallFace([N.minX, N.minZ], [N.maxX, N.minZ], new THREE.Vector3(0, 0, 1), [{ u0: NW.x0 - N.minX, u1: NW.x1 - N.minX, v0: NW.y0, v1: NW.y1 }], nurseryMat));
@@ -147,18 +184,34 @@ export class House {
     this.root.add(wallFace([0.0, L.minZ], [0.0, L.maxZ], new THREE.Vector3(1, 0, 0), [{ u0: door.z0 - L.minZ, u1: door.z1 - L.minZ, v0: 0, v1: door.h }], livingMat, 1.1));
 
     // floors
-    const floorTex = T.woodFloor();
     const mkFloor = (r: { minX: number; maxX: number; minZ: number; maxZ: number }) => {
       const w = r.maxX - r.minX, d = r.maxZ - r.minZ;
-      const t = floorTex.clone();
-      t.needsUpdate = true;
-      t.repeat.set(w / 1.8, d / 1.8);
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: t, roughness: 0.75 }));
+      const rep = (t: THREE.Texture) => {
+        const c = t.clone();
+        c.repeat.set(w / 1.9, d / 1.9);
+        return c;
+      };
+      const geo = new THREE.PlaneGeometry(w, d);
+      geo.setAttribute('uv1', geo.getAttribute('uv').clone());
+      const m = new THREE.Mesh(
+        geo,
+        new THREE.MeshStandardMaterial({
+          map: rep(tx.floorDiff),
+          normalMap: rep(tx.floorNor),
+          roughnessMap: rep(tx.floorRough),
+          roughness: 0.95,
+          color: '#fff1e2',
+          aoMap: floorAO,
+          envMapIntensity: 0.9,
+        }),
+      );
       m.rotation.x = -Math.PI / 2;
       m.position.set((r.minX + r.maxX) / 2, 0, (r.minZ + r.maxZ) / 2);
       m.receiveShadow = true;
       this.root.add(m);
-      const c = new THREE.Mesh(new THREE.PlaneGeometry(w, d), ceilMat);
+      const cg = new THREE.PlaneGeometry(w, d);
+      cg.setAttribute('uv1', cg.getAttribute('uv').clone());
+      const c = new THREE.Mesh(cg, ceilMat);
       c.rotation.x = Math.PI / 2;
       c.position.set((r.minX + r.maxX) / 2, H, (r.minZ + r.maxZ) / 2);
       c.castShadow = true;
@@ -173,7 +226,7 @@ export class House {
     this.root.add(strip);
 
     // skirting boards + crown moulding (merged per room)
-    const trim = new THREE.MeshStandardMaterial({ color: '#f7f0e6', roughness: 0.8, flatShading: true });
+    const trim = new THREE.MeshStandardMaterial({ color: '#f7f0e6', roughness: 0.45 });
     const addTrim = (x: number, z: number, w: number, d: number, y: number, h: number) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), trim);
       m.position.set(x, y, z);
@@ -191,7 +244,7 @@ export class House {
       }
     }
     // door casing on both sides
-    const casing = new THREE.MeshStandardMaterial({ color: '#f7f0e6', roughness: 0.7, flatShading: true });
+    const casing = new THREE.MeshStandardMaterial({ color: '#f7f0e6', roughness: 0.45 });
     for (const s of [-1, 1]) {
       for (const z of [door.z0, door.z1]) {
         const m = new THREE.Mesh(new THREE.BoxGeometry(0.03, door.h + 0.08, 0.08), casing);
@@ -228,6 +281,7 @@ export class House {
     );
     sky.position.set(1, 6, -18);
     this.root.add(sky);
+    this.sky = sky;
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 18), new THREE.MeshStandardMaterial({ color: '#9db38a', roughness: 1, flatShading: true }));
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(1, -0.3, -12);
@@ -322,7 +376,7 @@ export class House {
     this.lookable('nwindow', '窗外的树', wf, 4.5);
 
     // striped rug
-    const rug = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.012, 1.8), new THREE.MeshStandardMaterial({ map: T.stripedRug(), roughness: 1 }));
+    const rug = new THREE.Mesh(new RoundedBoxGeometry(2.4, 0.014, 1.8, 2, 0.006), this.rugMat(T.stripedRug(), 2.4, 1.8));
     rug.position.set(-2.4, 0.006, 0.6);
     rug.receiveShadow = true;
     this.root.add(rug);
@@ -389,7 +443,7 @@ export class House {
   private buildLiving() {
     const { lWindow: LW } = LAYOUT;
     // rug
-    const rug = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.014, 2.8), new THREE.MeshStandardMaterial({ map: T.livingRug(), roughness: 1 }));
+    const rug = new THREE.Mesh(new RoundedBoxGeometry(3.6, 0.016, 2.8, 2, 0.007), this.rugMat(T.livingRug(), 3.6, 2.8));
     rug.position.set(4.0, 0.007, 0.3);
     rug.receiveShadow = true;
     this.root.add(rug);
@@ -486,15 +540,17 @@ export class House {
   }
 
   /* ---------- lights ---------- */
+  hemi!: THREE.HemisphereLight;
+  sky!: THREE.Mesh;
+  private sunTarget = new THREE.Vector3(1.0, 0, 0);
   private buildLights() {
-    const hemi = new THREE.HemisphereLight('#f3eeff', '#ecd5c4', 1.7);
+    // the HDR environment (set by the game) does most of the soft bounce now; the hemi only adds the pastel tint
+    const hemi = new THREE.HemisphereLight('#f6eefc', '#e8cdb8', 0.55);
     this.scene.add(hemi);
-    const amb = new THREE.AmbientLight('#cfc2ea', 0.35);
-    this.scene.add(amb);
-    const sun = new THREE.DirectionalLight('#ffc996', 3.2);
-    const target = new THREE.Vector3(1.0, 0, 0);
-    sun.position.copy(target).add(new THREE.Vector3(-1.4, 2.4, -3.6).multiplyScalar(4));
-    sun.target.position.copy(target);
+    this.hemi = hemi;
+    const sun = new THREE.DirectionalLight('#ffd2a0', 4.2);
+    sun.position.copy(this.sunTarget).add(new THREE.Vector3(-1.4, 2.4, -3.6).multiplyScalar(4));
+    sun.target.position.copy(this.sunTarget);
     sun.castShadow = true;
     const s = this.quality === 'high' ? 2048 : 1024;
     sun.shadow.mapSize.set(s, s);
@@ -505,12 +561,51 @@ export class House {
     cam.bottom = -6;
     cam.near = 1;
     cam.far = 40;
-    sun.shadow.bias = -0.0006;
-    sun.shadow.normalBias = 0.025;
-    sun.shadow.radius = 3;
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.03;
+    sun.shadow.radius = this.quality === 'high' ? 5 : 3;
+    sun.shadow.blurSamples = 12;
     this.scene.add(sun, sun.target);
     this.sun = sun;
   }
+
+  /** contact shadows under furniture – baked-AO look without an SSAO pass */
+  private buildContactShadows() {
+    const c = LAYOUT.crib;
+    this.blob(c.x, c.z, 1.15, 1.75, 0.55);
+    this.blob(-4.68, 0.62, 0.75, 0.65, 0.45);
+    this.blob(-2.4, 2.24, 1.35, 0.7, 0.45);
+    this.blob(-0.85, -1.75, 1.15, 1.05, 0.5);
+    this.blob(-0.55, 2.05, 0.6, 0.6, 0.45);
+    this.blob(6.4, 0.2, 1.25, 2.4, 0.55);
+    this.blob(2.7, -2.6, 1.35, 1.35, 0.5, 0.017, 0.45);
+    this.blob(4.0, 1.75, 1.45, 0.95, 0.35, 0.02);
+    this.blob(2.3, 3.15, 1.0, 0.7, 0.45);
+    this.blob(5.0, 3.26, 1.7, 0.65, 0.45);
+    this.blob(6.83, -2.6, 0.55, 1.2, 0.45);
+    this.blob(6.6, -1.55, 0.5, 0.5, 0.4);
+    this.blob(0.85, -2.95, 0.8, 0.8, 0.4);
+    this.blob(6.6, 2.95, 0.55, 0.55, 0.4);
+    this.blob(4.3, -3.15, 0.5, 0.5, 0.4);
+  }
+
+  /**
+   * Time of day 0 = warm afternoon → 1 = golden dusk. The sun drops and turns orange,
+   * lamps warm up, the sky deepens. Driven slowly by the game over the demo.
+   */
+  setDayPhase(k: number) {
+    const sun = this.sun;
+    const elev = THREE.MathUtils.lerp(2.4, 1.15, k);
+    sun.position.copy(this.sunTarget).add(new THREE.Vector3(-1.4 - k * 0.8, elev, -3.6).multiplyScalar(4));
+    sun.color.lerpColors(_cA.set('#ffd6a6'), _cB.set('#ff9a5e'), k);
+    sun.intensity = THREE.MathUtils.lerp(4.2, 2.6, k);
+    this.hemi.intensity = THREE.MathUtils.lerp(0.55, 0.38, k);
+    this.hemi.color.lerpColors(_cA.set('#f6eefc'), _cB.set('#d9c6ef'), k);
+    this.lampBase = THREE.MathUtils.lerp(1.0, 1.9, k);
+    if (this.sky) (this.sky.material as THREE.MeshBasicMaterial).color.lerpColors(_cA.setRGB(1.25, 1.2, 1.15), _cB.setRGB(1.05, 0.8, 0.85), k);
+    for (const b of this.beams) (b.material as THREE.MeshBasicMaterial).opacity = THREE.MathUtils.lerp(0.2, 0.3, k);
+  }
+  lampBase = 1;
 
   /* ---------- volumetric-ish sun beams + dust ---------- */
   private buildBeams() {
@@ -598,7 +693,7 @@ export class House {
     }
     pos.needsUpdate = true;
     // lamps breathe a little
-    this.lampLights.forEach((l, i) => (l.intensity = (i === 0 ? 2.2 : 2.6) * (1 + Math.sin(t * 1.3 + i) * 0.03)));
+    this.lampLights.forEach((l, i) => (l.intensity = (i === 0 ? 2.2 : 2.6) * this.lampBase * (1 + Math.sin(t * 1.3 + i) * 0.03)));
   }
 
   /** highest support surface below `maxY` at (x,z) */

@@ -3,12 +3,12 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { Builder, C, Mat, extrude, moonShape, starShape, rand, srand } from './lowpoly';
 import * as T from './textures';
 
-/* Shared primitive factories (low segment counts on purpose) */
+/* Shared primitive factories – v2 uses enough segments for smooth, believable shapes */
 const box = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d);
-const rbox = (w: number, h: number, d: number, r = 0.04, seg = 2) => new RoundedBoxGeometry(w, h, d, seg, r);
-const ico = (r: number, detail = 1) => new THREE.IcosahedronGeometry(r, detail);
-const cyl = (rt: number, rb: number, h: number, seg = 7) => new THREE.CylinderGeometry(rt, rb, h, seg);
-const cap = (r: number, len: number, seg = 6) => new THREE.CapsuleGeometry(r, len, 2, seg);
+const rbox = (w: number, h: number, d: number, r = 0.04, seg = 2) => new RoundedBoxGeometry(w, h, d, Math.max(3, seg + 1), r);
+const ico = (r: number, _detail = 1) => new THREE.IcosahedronGeometry(r, r < 0.035 ? 2 : 3);
+const cyl = (rt: number, rb: number, h: number, seg = 7) => new THREE.CylinderGeometry(rt, rb, h, Math.max(16, seg * 2));
+const cap = (r: number, len: number, seg = 6) => new THREE.CapsuleGeometry(r, len, 4, Math.max(12, seg * 2));
 
 /* ================= NURSERY ================= */
 
@@ -46,11 +46,11 @@ export function crib(): THREE.Mesh {
   }
   // base board + mattress + sheets
   b.add(box(W - 0.04, 0.05, L - 0.04), C.wood, { pos: [0, 0.37, 0] });
-  b.add(rbox(W - 0.08, 0.1, L - 0.08, 0.035), '#eef0f8', { pos: [0, 0.43, 0], variation: 0.04 });
+  b.add(rbox(W - 0.08, 0.1, L - 0.08, 0.035), '#eef0f8', { pos: [0, 0.43, 0], variation: 0.04, surf: 'fabric' });
   // pillow at head (-z)
-  b.add(rbox(0.36, 0.06, 0.2, 0.03), '#e9e2f2', { pos: [-0.12, 0.5, -L / 2 + 0.2], rot: [0, 0.1, 0.06] });
+  b.add(rbox(0.36, 0.06, 0.2, 0.03), '#e9e2f2', { pos: [-0.12, 0.5, -L / 2 + 0.2], rot: [0, 0.1, 0.06], surf: 'fabric' });
   // folded blanket (yellow, like concept-01)
-  b.add(rbox(W - 0.12, 0.05, 0.42, 0.025), '#f4dc95', { pos: [0, 0.495, L / 2 - 0.3], rot: [0, 0, 0.03], jitter: 0.006 });
+  b.add(rbox(W - 0.12, 0.05, 0.42, 0.025), '#f4dc95', { pos: [0, 0.495, L / 2 - 0.3], rot: [0, 0, 0.03], jitter: 0.006, surf: 'fabric' });
   return b.mesh();
 }
 
@@ -94,7 +94,7 @@ export function mobileHub(): MobileParts {
   specs.forEach((s, i) => {
     const holder = new THREE.Group();
     holder.position.set(Math.cos(s.a) * s.r, 0, Math.sin(s.a) * s.r);
-    const string = new THREE.Mesh(cyl(0.0025, 0.0025, s.len, 4), new THREE.MeshBasicMaterial({ color: '#fbf3e6' }));
+    const string = new THREE.Mesh(new THREE.CylinderGeometry(0.0025, 0.0025, s.len, 4), new THREE.MeshBasicMaterial({ color: '#fbf3e6' }));
     string.position.y = -s.len / 2;
     string.userData.noOutline = true;
     holder.add(string);
@@ -142,7 +142,7 @@ export function pillLamp(): THREE.Group {
 }
 
 export function teddy(): THREE.Mesh {
-  const b = new Builder();
+  const b = new Builder('fur');
   const fur = C.bear, light = C.bearLight, dark = '#3b2a22';
   const j = 0.006;
   b.add(ico(0.11, 1), fur, { pos: [0, 0.13, 0], scale: [1, 1.12, 0.9], jitter: j });
@@ -154,21 +154,21 @@ export function teddy(): THREE.Mesh {
     b.add(cap(0.034, 0.08), fur, { pos: [s * 0.115, 0.16, 0.03], rot: [0.5, 0, s * 0.75], jitter: 0.004 });
     b.add(cap(0.042, 0.06), fur, { pos: [s * 0.06, 0.045, 0.085], rot: [Math.PI / 2 - 0.2, 0, s * 0.15], jitter: 0.004 });
     b.add(ico(0.028, 0), light, { pos: [s * 0.062, 0.04, 0.15], scale: [1, 1, 0.4] });
-    b.add(ico(0.015, 1), dark, { pos: [s * 0.042, 0.343, 0.085], scale: [1, 1.1, 0.7] });
+    b.add(ico(0.015, 1), dark, { pos: [s * 0.042, 0.343, 0.085], scale: [1, 1.1, 0.7] , surf: 'plastic' });
   }
   b.add(ico(0.047, 1), light, { pos: [0, 0.3, 0.075], scale: [1, 0.78, 0.75] });
-  b.add(ico(0.016, 0), dark, { pos: [0, 0.312, 0.11], scale: [1.2, 0.8, 1] });
+  b.add(ico(0.016, 0), dark, { pos: [0, 0.312, 0.11], scale: [1.2, 0.8, 1] , surf: 'plastic' });
   return b.mesh(Mat.vcSoft);
 }
 
 export function bunnyPlush(): THREE.Mesh {
-  const b = new Builder();
+  const b = new Builder('fur');
   const col = '#c9d6ef';
   b.add(ico(0.07, 1), col, { pos: [0, 0.07, 0], scale: [1, 1.1, 0.9] });
   b.add(ico(0.06, 1), col, { pos: [0, 0.18, 0] });
   for (const s of [-1, 1]) {
     b.add(cap(0.018, 0.08), col, { pos: [s * 0.025, 0.27, 0], rot: [0, 0, s * 0.2] });
-    b.add(ico(0.008, 0), '#3b2a22', { pos: [s * 0.022, 0.19, 0.055] });
+    b.add(ico(0.008, 0), '#3b2a22', { pos: [s * 0.022, 0.19, 0.055] , surf: 'plastic' });
   }
   b.add(ico(0.008, 0), '#e58b95', { pos: [0, 0.175, 0.06] });
   return b.mesh(Mat.vcSoft);
@@ -256,8 +256,8 @@ export function coffeeTable(): THREE.Mesh {
   for (const sx of [-1, 1]) for (const sz of [-1, 1])
     b.add(box(0.06, H - 0.03, 0.06), C.wood, { pos: [sx * (W / 2 - 0.07), (H - 0.03) / 2, sz * (D / 2 - 0.07)], jitter: 0.003 });
   // mug + books
-  b.add(cyl(0.045, 0.04, 0.1, 8), '#e8e3dc', { pos: [0.3, H + 0.08, 0.05] });
-  b.add(new THREE.TorusGeometry(0.025, 0.008, 4, 6), '#e8e3dc', { pos: [0.35, H + 0.08, 0.05] });
+  b.add(cyl(0.045, 0.04, 0.1, 8), '#e8e3dc', { pos: [0.3, H + 0.08, 0.05], surf: 'ceramic' });
+  b.add(new THREE.TorusGeometry(0.025, 0.008, 8, 14), '#e8e3dc', { pos: [0.35, H + 0.08, 0.05], surf: 'ceramic' });
   b.add(box(0.28, 0.04, 0.2), '#7f9ac9', { pos: [-0.25, H + 0.05, -0.05], rot: [0, 0.2, 0] });
   b.add(box(0.25, 0.035, 0.18), '#e8c7a0', { pos: [-0.25, H + 0.088, -0.05], rot: [0, 0.05, 0] });
   return b.mesh();
@@ -285,7 +285,7 @@ export function toyBox(): THREE.Group {
 }
 
 export function ball(radius = 0.11): THREE.Mesh {
-  const b = new Builder();
+  const b = new Builder('plastic');
   const cols = [new THREE.Color('#e6514f'), new THREE.Color('#f5c64a'), new THREE.Color('#3f74cf'), new THREE.Color('#f5c64a')];
   b.add(ico(radius, 1), '#fff', {
     variation: 0.05,
@@ -299,10 +299,10 @@ export function ball(radius = 0.11): THREE.Mesh {
 }
 
 export function letterBlock(letter: string, idx: number, size = 0.1): THREE.Mesh {
-  const geo = new RoundedBoxGeometry(size, size, size, 1, size * 0.08);
+  const geo = new RoundedBoxGeometry(size, size, size, 3, size * 0.1);
   const mats: THREE.Material[] = [];
   const letters = [letter, letter, String(idx + 1), String(idx + 1), letter, letter];
-  for (let i = 0; i < 6; i++) mats.push(new THREE.MeshStandardMaterial({ map: T.blockFace(letters[i], idx), roughness: 0.75, flatShading: true }));
+  for (let i = 0; i < 6; i++) mats.push(new THREE.MeshStandardMaterial({ map: T.blockFace(letters[i], idx), roughness: 0.55 }));
   const m = new THREE.Mesh(geo, mats);
   m.castShadow = true;
   m.receiveShadow = true;
@@ -320,7 +320,7 @@ export interface DogParts {
 export function dog(): DogParts {
   const root = new THREE.Group();
   const coat = C.dog, light = C.dogLight;
-  const b = new Builder();
+  const b = new Builder('fur');
   const j = 0.012;
   b.add(ico(0.22, 1), coat, { pos: [0, 0.15, 0], scale: [1.55, 0.72, 0.95], jitter: j });
   b.add(ico(0.16, 1), light, { pos: [0.24, 0.15, 0.04], scale: [1, 0.85, 1], jitter: j, seed: 2 });
@@ -336,10 +336,10 @@ export function dog(): DogParts {
 
   const head = new THREE.Group();
   head.position.set(0.42, 0.13, 0);
-  const hb = new Builder();
+  const hb = new Builder('fur');
   hb.add(ico(0.12, 1), coat, { pos: [0.02, 0.04, 0], scale: [1, 0.9, 0.95], jitter: 0.008 });
   hb.add(ico(0.07, 1), light, { pos: [0.13, 0.0, 0], scale: [1.2, 0.75, 0.85], jitter: 0.005 });
-  hb.add(ico(0.025, 0), '#3a2418', { pos: [0.21, 0.02, 0], scale: [1, 0.8, 1.2] });
+  hb.add(ico(0.025, 0), '#3a2418', { pos: [0.21, 0.02, 0], scale: [1, 0.8, 1.2] , surf: 'plastic' });
   for (const s of [-1, 1]) hb.add(ico(0.07, 1), '#d39c58', { pos: [-0.02, 0.0, s * 0.11], scale: [0.7, 1.3, 0.35], rot: [s * 0.3, 0, 0.2], jitter: 0.006 });
   const hm = hb.mesh(Mat.vcSoft);
   head.add(hm);
@@ -354,7 +354,7 @@ export function dog(): DogParts {
 
   const tail = new THREE.Group();
   tail.position.set(-0.32, 0.12, 0);
-  const tb = new Builder();
+  const tb = new Builder('fur');
   tb.add(cap(0.035, 0.22), light, { pos: [-0.12, 0, 0], rot: [0, 0, Math.PI / 2], jitter: 0.004 });
   tail.add(tb.mesh(Mat.vcSoft));
   tail.rotation.y = 0.6;
@@ -371,10 +371,10 @@ export function plant(scale = 1, potColor = C.pot): THREE.Mesh {
     const a = (i / 9) * Math.PI * 2 + rand() * 0.4;
     const tilt = 0.35 + rand() * 0.5;
     const len = 0.3 + rand() * 0.18;
-    b.add(new THREE.ConeGeometry(0.05, len, 4), i % 2 ? C.leaf : C.leafDark, {
+    b.add(new THREE.SphereGeometry(0.05, 10, 8), i % 2 ? C.leaf : C.leafDark, {
       pos: [Math.cos(a) * 0.06, 0.24 + len / 2 - 0.02, Math.sin(a) * 0.06],
       rot: [Math.sin(a) * tilt, 0, -Math.cos(a) * tilt],
-      scale: [1, 1, 0.35],
+      scale: [1, len / 0.1, 0.32],
       variation: 0.12,
     });
   }
@@ -435,7 +435,7 @@ export function sideboard(color = C.mint): THREE.Mesh {
   for (const sx of [-1, 1]) for (const sz of [-1, 1])
     b.add(cyl(0.022, 0.015, 0.1, 5), C.woodLight, { pos: [sx * (W / 2 - 0.06), 0.05, sz * (D / 2 - 0.06)] });
   // vase + jar on top
-  b.add(cyl(0.06, 0.08, 0.2, 7), '#f2ece2', { pos: [0.45, H + 0.11, 0] });
+  b.add(cyl(0.06, 0.08, 0.2, 7), '#f2ece2', { pos: [0.45, H + 0.11, 0], surf: 'ceramic' });
   b.add(ico(0.06, 1), '#efb3b8', { pos: [0.45, H + 0.26, 0], jitter: 0.008 });
   b.add(cyl(0.07, 0.07, 0.14, 7), '#f3d3a6', { pos: [-0.4, H + 0.08, 0.02] });
   return b.mesh();
@@ -465,7 +465,7 @@ export function windowFrame(w: number, h: number, depth = 0.16, color = '#f6efe6
 }
 
 export function curtain(w: number, h: number, color: string, pattern: string, opacity = 0.85): THREE.Mesh {
-  const geo = new THREE.PlaneGeometry(w, h, 10, 2);
+  const geo = new THREE.PlaneGeometry(w, h, 40, 4);
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
@@ -478,7 +478,6 @@ export function curtain(w: number, h: number, color: string, pattern: string, op
     transparent: opacity < 1,
     opacity,
     roughness: 1,
-    flatShading: true,
   });
   const m = new THREE.Mesh(geo, mat);
   m.castShadow = true;
@@ -493,9 +492,9 @@ export function tree(height = 3, seed = 1, col = C.leafDark): THREE.Mesh {
   const n = 3 + Math.floor(rand() * 2);
   for (let i = 0; i < n; i++) {
     const r = height * (0.22 + rand() * 0.1);
-    b.add(ico(r, 0), i % 2 ? col : '#5f8f74', {
+    b.add(new THREE.IcosahedronGeometry(r, 2), i % 2 ? col : '#5f8f74', {
       pos: [(rand() - 0.5) * height * 0.3, height * (0.5 + i * 0.13), (rand() - 0.5) * height * 0.3],
-      jitter: r * 0.12,
+      jitter: r * 0.5,
       variation: 0.15,
       seed: seed * 10 + i,
     });
@@ -508,7 +507,7 @@ export function pineTree(height = 3, seed = 1): THREE.Mesh {
   b.add(cyl(0.06, 0.09, height * 0.3, 5), '#6e4b3a', { pos: [0, height * 0.15, 0] });
   for (let i = 0; i < 3; i++) {
     const r = height * (0.3 - i * 0.07);
-    b.add(new THREE.ConeGeometry(r, height * 0.4, 6), '#4f7a66', { pos: [0, height * (0.35 + i * 0.2), 0], jitter: r * 0.08, seed: seed + i, variation: 0.14 });
+    b.add(new THREE.ConeGeometry(r, height * 0.4, 14), '#4f7a66', { pos: [0, height * (0.35 + i * 0.2), 0], jitter: r * 0.08, seed: seed + i, variation: 0.14 });
   }
   return b.mesh();
 }
@@ -530,11 +529,11 @@ export function pictureFrame(w: number, h: number, variant: number): THREE.Group
 export function babyBottle(): THREE.Group {
   const g = new THREE.Group();
   const b = new Builder();
-  b.add(cyl(0.032, 0.032, 0.12, 9), '#dfe6ef', { pos: [0, 0, 0], variation: 0.03 });
+  b.add(cyl(0.032, 0.032, 0.12, 9), '#dfe6ef', { pos: [0, 0, 0], variation: 0.03, surf: 'ceramic' });
   b.add(cyl(0.036, 0.036, 0.025, 9), '#9fd0c0', { pos: [0, 0.07, 0] });
   b.add(new THREE.ConeGeometry(0.018, 0.045, 7), '#f2d0a4', { pos: [0, 0.1, 0] });
   g.add(b.mesh(Mat.vc, false, false));
-  const milk = new THREE.Mesh(new THREE.CylinderGeometry(0.0335, 0.0335, 0.1, 9), new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.6, flatShading: true }));
+  const milk = new THREE.Mesh(new THREE.CylinderGeometry(0.0335, 0.0335, 0.1, 20), new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.45 }));
   milk.position.y = -0.01;
   milk.name = 'milk';
   g.add(milk);

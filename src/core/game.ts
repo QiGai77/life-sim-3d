@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { bus, tweens, ease, clamp, lerp } from './events';
 import { Input, type Action } from './input';
+import { assets } from './assets';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx } from './audio';
 import { House, LAYOUT } from '../world/house';
 import { babyBottle } from '../world/props';
@@ -69,14 +71,20 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
     this.pixelRatio = Math.min(window.devicePixelRatio || 1, this.mobile ? 1.6 : 2);
     this.renderer.setPixelRatio(this.pixelRatio);
-    this.renderer.toneMapping = THREE.NeutralToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap; // r18x PCF is soft (shadow.radius)
 
     this.scene.background = new THREE.Color('#d9c7df');
-    this.scene.fog = new THREE.Fog('#e6d3df', 6, 22);
+    this.scene.fog = new THREE.Fog('#e6d3df', 7, 24);
+    // image-based lighting: CC0 Poly Haven HDRI (self-hosted) → PMREM, RoomEnvironment as fallback
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = assets.hdr ? pmrem.fromEquirectangular(assets.hdr).texture : pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.55;
+    this.scene.environmentRotation.set(0, 1.2, 0);
+    pmrem.dispose();
 
     this.baby = new Baby(window.innerWidth / window.innerHeight);
     this.scene.add(this.baby.camera);
@@ -903,6 +911,7 @@ export class Game {
     this.updateHearts(dt);
     this.parent.update(dt);
     this.house.update(this.time, dt);
+    if (this.state === 'play') this.house.setDayPhase(clamp(this.playTime / 720, 0, 1) * 0.85);
     this.outline.update(dt);
 
     // hands follow state

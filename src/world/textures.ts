@@ -128,31 +128,80 @@ export function stripedRug(): THREE.CanvasTexture {
   return tex(c);
 }
 
-/** chunky pink/cream/blue living room rug like concept-02 */
+/** soft hand-tufted living room rug (pink / cream / dusty blue, like concept-02) */
 export function livingRug(): THREE.CanvasTexture {
-  const [c, g] = canvas(512, 384);
-  g.fillStyle = '#f6e9dc';
-  g.fillRect(0, 0, 512, 384);
+  const [c, g] = canvas(1024, 768);
+  g.fillStyle = '#f4e8da';
+  g.fillRect(0, 0, 1024, 768);
   srand(5);
-  const blob = (color: string, x: number, y: number, s: number) => {
+  // soft organic patches
+  const patch = (color: string, x: number, y: number, rx: number, ry: number) => {
     g.fillStyle = color;
-    // pixel-ish blocky blobs
-    for (let i = 0; i < 26; i++) {
-      const bx = x + (rand() - 0.5) * s * 2, by = y + (rand() - 0.5) * s;
-      g.fillRect(Math.round(bx / 16) * 16, Math.round(by / 16) * 16, 32 + rand() * 32, 16 + rand() * 16);
+    g.beginPath();
+    const n = 9;
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const r = 0.75 + rand() * 0.4;
+      const px = x + Math.cos(a) * rx * r, py = y + Math.sin(a) * ry * r;
+      if (i === 0) g.moveTo(px, py);
+      else g.quadraticCurveTo(x + Math.cos(a - 0.35) * rx * 1.15, y + Math.sin(a - 0.35) * ry * 1.15, px, py);
     }
+    g.fill();
   };
-  for (let i = 0; i < 9; i++) blob('#eab3b4', rand() * 512, rand() * 384, 60);
-  for (let i = 0; i < 4; i++) blob('#a6b9cf', rand() * 512, 300 + rand() * 80, 70);
-  for (let i = 0; i < 4000; i++) {
-    g.fillStyle = `rgba(255,255,255,${rand() * 0.18})`;
-    g.fillRect(rand() * 512, rand() * 384, 2, 2);
+  for (let i = 0; i < 11; i++) patch('#e9b2b0', 60 + rand() * 900, 60 + rand() * 640, 60 + rand() * 70, 34 + rand() * 40);
+  for (let i = 0; i < 6; i++) patch('#a9bccf', 60 + rand() * 900, 420 + rand() * 300, 70 + rand() * 60, 30 + rand() * 30);
+  for (let i = 0; i < 5; i++) patch('#f2d3a8', 60 + rand() * 900, rand() * 400, 40 + rand() * 40, 26 + rand() * 20);
+  // fibre noise
+  for (let i = 0; i < 26000; i++) {
+    const a = rand() * 0.22;
+    g.fillStyle = rand() < 0.5 ? `rgba(255,255,255,${a})` : `rgba(110,70,60,${a * 0.45})`;
+    g.fillRect(rand() * 1024, rand() * 768, 2, 2);
   }
-  // border
-  g.strokeStyle = '#e7c9b5';
-  g.lineWidth = 10;
-  g.strokeRect(5, 5, 502, 374);
+  // woven border
+  g.strokeStyle = '#e2c4ae';
+  g.lineWidth = 22;
+  g.strokeRect(11, 11, 1002, 746);
+  g.strokeStyle = 'rgba(255,255,255,0.5)';
+  g.lineWidth = 3;
+  g.setLineDash([8, 6]);
+  g.strokeRect(30, 30, 964, 708);
   return tex(c);
+}
+
+/** ambient-occlusion style texture: darker toward the edges (used on uv1 of walls / floors) */
+export function edgeAO(strengthX = 0.5, strengthY = 0.5, widthX = 0.06, widthY = 0.08, top = true): THREE.CanvasTexture {
+  const S = 64;
+  const [c, g] = canvas(S, S);
+  const img = g.createImageData(S, S);
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      const u = (x + 0.5) / S, v = 1 - (y + 0.5) / S;
+      const dx = Math.min(u, 1 - u), dyB = v, dyT = 1 - v;
+      let ao = 1;
+      ao *= 1 - strengthX * Math.exp(-dx / widthX);
+      ao *= 1 - strengthY * Math.exp(-dyB / widthY);
+      if (top) ao *= 1 - strengthY * 0.6 * Math.exp(-dyT / (widthY * 0.8));
+      const k = (y * S + x) * 4;
+      const val = Math.round(ao * 255);
+      img.data[k] = img.data[k + 1] = img.data[k + 2] = val;
+      img.data[k + 3] = 255;
+    }
+  g.putImageData(img, 0, 0);
+  const t = tex(c, undefined, false);
+  t.channel = 1;
+  return t;
+}
+
+/** soft round contact shadow */
+export function blobShadow(): THREE.CanvasTexture {
+  const [c, g] = canvas(128, 128);
+  const gr = g.createRadialGradient(64, 64, 4, 64, 64, 62);
+  gr.addColorStop(0, 'rgba(0,0,0,0.85)');
+  gr.addColorStop(0.45, 'rgba(0,0,0,0.5)');
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 128, 128);
+  return tex(c, undefined, false);
 }
 
 const blockPalette = ['#f2a7a0', '#9ec7e8', '#a8d5b5', '#f6d98a', '#c8b4e2', '#f4bf95'];
@@ -169,7 +218,7 @@ export function blockFace(letter: string, idx: number): THREE.CanvasTexture {
   g.fillRect(0, 0, 14, 128);
   g.fillRect(114, 0, 14, 128);
   g.fillStyle = letterCols[idx % letterCols.length];
-  g.font = 'bold 82px "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
+  g.font = /[\u4e00-\u9fff]/.test(letter) ? '78px WenKai, "PingFang SC", sans-serif' : 'bold 82px "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.fillText(letter, 64, 70);
