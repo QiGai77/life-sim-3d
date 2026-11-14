@@ -2,16 +2,15 @@ import * as THREE from 'three';
 import { mergeGeometries, mergeVertices, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
- * Procedural model helpers (v2: smooth PBR).
+ * Procedural model helpers (v3: realistic PBR surfaces & clean geometry).
  *
- * Every procedural model is assembled from three.js primitives that are
- *  - smooth-shaded with creased normals (hard edges stay crisp, round things stay round)
- *  - vertex-coloured, tagged with a surface type (wood / fabric / fur / plastic …)
- *  - box-projected UVs so real CC0 detail maps (grain, velvet, fur) can be applied
- *  - baked into one geometry per object (one draw call)
+ * Every procedural model is assembled from smooth primitives that are
+ *  - smooth-shaded with creased normals (crisp edges, smooth curves, zero cartoon jitter)
+ *  - vertex-coloured, tagged with a surface type (wood / fabric / fur / plastic / ceramic / metal / leaf / glass)
+ *  - box-projected UVs driving real CC0 detail normal/roughness/grain maps
+ *  - baked into one geometry per object for high performance
  */
 
-// deterministic hash → [0,1)
 export function hash3(x: number, y: number, z: number, seed = 0): number {
   const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 19.19) * 43758.5453;
   return s - Math.floor(s);
@@ -22,7 +21,6 @@ export function srand(seed: number) {
   rngState = seed >>> 0 || 1;
 }
 export function rand(): number {
-  // mulberry32
   rngState |= 0;
   rngState = (rngState + 0x6d2b79f5) | 0;
   let t = Math.imul(rngState ^ (rngState >>> 15), 1 | rngState);
@@ -48,22 +46,19 @@ export function jitter(geo: THREE.BufferGeometry, amount: number, seed = 0): THR
   return geo;
 }
 
-/** v2: props are smooth now – the old low-poly jitter is mostly switched off. */
-export const JITTER_SCALE = 0.15;
+/** v3: clean architectural & realistic prop geometry (no low-poly jitter). */
+export const JITTER_SCALE = 0;
 
 /** Surface types, stored per vertex in the `surf` attribute and resolved in one shared PBR shader. */
-export const S = { paint: 0, wood: 1, fabric: 2, fur: 3, plastic: 4, ceramic: 5, leaf: 6, glow: 7 } as const;
+export const S = { paint: 0, wood: 1, fabric: 2, fur: 3, plastic: 4, ceramic: 5, leaf: 6, glow: 7, metal: 8 } as const;
 export type SurfName = keyof typeof S;
 
 export interface PaintOpts {
   jitter?: number;
-  variation?: number; // colour variation (now smooth, low-frequency)
+  variation?: number;
   seed?: number;
-  /** optional per-face colour function (local position → colour) – keeps hard colour edges */
   colorFn?: (p: THREE.Vector3, n: THREE.Vector3) => THREE.Color;
-  /** surface type; auto-detected from the colour when omitted */
   surf?: SurfName;
-  /** crease angle for smooth normals (radians) */
   crease?: number;
 }
 
@@ -77,16 +72,16 @@ const _d = new THREE.Vector3();
 const lowNoise = (x: number, y: number, z: number, s: number) =>
   (Math.sin(x * 6.1 + y * 2.3 + s) * Math.sin(z * 5.3 + x * 1.7 + s * 2.1) + Math.sin(y * 4.7 + z * 3.1 + s * 0.7) * 0.5) / 1.5;
 
-/** Smooth-shaded (creased normals), vertex-coloured copy of a geometry. Keeps position/normal/color. */
+/** Smooth-shaded (creased normals), vertex-coloured copy of a geometry. */
 export function paint(src: THREE.BufferGeometry, color: THREE.ColorRepresentation, o: PaintOpts = {}): THREE.BufferGeometry {
   let geo = src.index ? src.toNonIndexed() : src.clone();
   for (const k of Object.keys(geo.attributes)) if (k !== 'position') geo.deleteAttribute(k);
   jitter(geo, o.jitter ?? 0, o.seed ?? 0);
-  geo = toCreasedNormals(geo, o.crease ?? 0.62);
+  geo = toCreasedNormals(geo, o.crease ?? 0.68);
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const cols = new Float32Array(pos.count * 3);
   const base = new THREE.Color(color);
-  const variation = (o.variation ?? 0.07) * 0.45;
+  const variation = (o.variation ?? 0.05) * 0.35;
   const seed = o.seed ?? 0;
   for (let i = 0; i < pos.count; i += 3) {
     if (o.colorFn) {
@@ -110,7 +105,7 @@ export function paint(src: THREE.BufferGeometry, color: THREE.ColorRepresentatio
   return geo;
 }
 
-/** world-scale box projection UVs (per triangle, dominant axis) – drives the detail maps */
+/** world-scale box projection UVs (per triangle, dominant axis) – drives detail maps */
 export function boxUV(geo: THREE.BufferGeometry) {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const uv = new Float32Array(pos.count * 2);
@@ -133,13 +128,15 @@ export function boxUV(geo: THREE.BufferGeometry) {
   geo.setAttribute('buv', new THREE.BufferAttribute(uv, 2));
 }
 
-const WOODS = new Set(['#c99566', '#dcb284', '#9b6a45', '#e6c49c', '#c8a77a', '#b08c5f', '#6e4b3a', '#e2c196', '#d8b27a']);
-const LEAVES = new Set(['#7fae7e', '#4f7d6a', '#5f8f74', '#4f7a66']);
+const WOODS = new Set(['#c28e5c', '#d4aa7d', '#8c5d3c', '#dfc09a', '#bfa075', '#a37d53', '#5c3f2e', '#d9b88c', '#c9a26d', '#c99566', '#dcb284', '#9b6a45', '#e6c49c']);
+const LEAVES = new Set(['#5e875c', '#3c6348', '#4f7d59', '#456f4d', '#7fae7e', '#4f7d6a', '#5f8f74', '#4f7a66']);
+const METALS = new Set(['#c9a255', '#b89448', '#8d949d', '#b8bec6', '#d6b365']);
 function autoSurf(color: THREE.ColorRepresentation, fallback: number): number {
   if (typeof color === 'string') {
     const c = color.toLowerCase();
     if (WOODS.has(c)) return S.wood;
     if (LEAVES.has(c)) return S.leaf;
+    if (METALS.has(c)) return S.metal;
   }
   return fallback;
 }
@@ -153,7 +150,6 @@ export interface PartOpts extends PaintOpts {
 /** Collects painted parts and merges them into a single mesh (one draw call). */
 export class Builder {
   parts: THREE.BufferGeometry[] = [];
-  /** default surface for parts without an explicit/auto-detected one */
   def: SurfName | null = null;
   constructor(def: SurfName | null = null) {
     this.def = def;
@@ -182,7 +178,6 @@ export class Builder {
     return this;
   }
 
-  /** add an already painted geometry with a matrix */
   addPainted(g: THREE.BufferGeometry, matrix?: THREE.Matrix4): this {
     const c = g.clone();
     if (matrix) c.applyMatrix4(matrix);
@@ -248,9 +243,9 @@ vec3 surfPerturb(vec3 eye_pos, vec3 surf_norm, vec2 uv, vec3 mapN) {
 }
 `;
 
-/** Patch a MeshStandardMaterial so that one draw call can be wood, fabric, fur, plastic… per vertex. */
+/** Patch a MeshStandardMaterial so one draw call supports realistic wood, fabric, fur, plastic, ceramic, foliage & brushed metal. */
 export function surfaceMaterial(tex: DetailTex, params: THREE.MeshStandardMaterialParameters = {}): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0, ...params });
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.56, metalness: 0, envMapIntensity: 0.95, ...params });
   m.onBeforeCompile = (sh) => {
     sh.uniforms.tGrain = { value: tex.woodGrain };
     sh.uniforms.tOakN = { value: tex.oakNor };
@@ -267,42 +262,53 @@ export function surfaceMaterial(tex: DetailTex, params: THREE.MeshStandardMateri
         '#include <color_fragment>',
         /* glsl */ `#include <color_fragment>
         int sType = int(vSurf + 0.5);
-        float sRough = roughness; vec3 sN = vec3(0.0, 0.0, 1.0); float sSheen = 0.0; vec2 sUv = vBoxUv;
-        if (sType == 1) {           // wood: real grain modulates the painted colour
-          sUv = vBoxUv * vec2(0.7, 2.2);
+        float sRough = roughness; float sMetal = metalness; vec3 sN = vec3(0.0, 0.0, 1.0); float sSheen = 0.0; vec2 sUv = vBoxUv;
+        if (sType == 1) {           // natural satin wood: rich grain + specular roughness modulation
+          sUv = vBoxUv * vec2(0.75, 2.4);
           float g = texture2D(tGrain, sUv).r;
-          diffuseColor.rgb *= mix(1.0, g * 1.12, 0.85);
-          sN = texture2D(tOakN, sUv).xyz * 2.0 - 1.0; sN.xy *= 0.8;
-          sRough = 0.52 + (1.0 - g) * 0.25;
-        } else if (sType == 2) {    // fabric / velvet
-          sUv = vBoxUv * 3.2;
-          sN = texture2D(tFabN, sUv).xyz * 2.0 - 1.0; sN.xy *= 1.1;
-          sRough = 0.92; sSheen = 0.22;
-        } else if (sType == 3) {    // plush fur
-          sUv = vBoxUv * 4.5;
-          diffuseColor.rgb *= mix(1.0, texture2D(tFurD, sUv).r * 1.1, 0.7);
-          sN = texture2D(tFurN, sUv).xyz * 2.0 - 1.0; sN.xy *= 1.4;
-          sRough = 0.98; sSheen = 0.35;
-        } else if (sType == 4) { sRough = 0.32; }
-        else if (sType == 5) { sRough = 0.18; }
-        else if (sType == 6) { sRough = 0.55; sSheen = 0.08; }
-        else if (sType == 7) { sRough = 0.6; }
-        else { sRough = roughness; }
+          diffuseColor.rgb *= mix(0.88, g * 1.14, 0.85);
+          sN = texture2D(tOakN, sUv).xyz * 2.0 - 1.0; sN.xy *= 0.95;
+          sRough = 0.40 + (1.0 - g) * 0.26;
+        } else if (sType == 2) {    // woven fabric / upholstery
+          sUv = vBoxUv * 3.8;
+          sN = texture2D(tFabN, sUv).xyz * 2.0 - 1.0; sN.xy *= 1.25;
+          sRough = 0.94; sSheen = 0.20;
+        } else if (sType == 3) {    // realistic plush fur
+          sUv = vBoxUv * 5.0;
+          diffuseColor.rgb *= mix(0.95, texture2D(tFurD, sUv).r * 1.08, 0.72);
+          sN = texture2D(tFurN, sUv).xyz * 2.0 - 1.0; sN.xy *= 1.5;
+          sRough = 0.98; sSheen = 0.30;
+        } else if (sType == 4) {    // satin polymer / toy plastic
+          sRough = 0.28;
+        } else if (sType == 5) {    // glazed ceramic
+          sRough = 0.14;
+        } else if (sType == 6) {    // natural foliage with subtle waxy specular & subsurface tint
+          sRough = 0.42; sSheen = 0.14;
+        } else if (sType == 7) {    // warm lamp shade
+          sRough = 0.72;
+        } else if (sType == 8) {    // brushed brass / metal hardware
+          sUv = vBoxUv * 4.0;
+          sN = texture2D(tOakN, sUv).xyz * 2.0 - 1.0; sN.xy *= 0.35;
+          sMetal = 0.88; sRough = 0.26;
+        } else {                    // matte lacquer / painted wood
+          sRough = 0.48;
+        }
         `,
       )
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = sRough;')
+      .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = sMetal;')
       .replace(
         '#include <normal_fragment_maps>',
         /* glsl */ `#include <normal_fragment_maps>
-        if (sType >= 1 && sType <= 3) normal = surfPerturb(-vViewPosition, normal, sUv, normalize(mix(vec3(0.,0.,1.), sN, uDetail)));`,
+        if (sType == 1 || sType == 2 || sType == 3 || sType == 8) normal = surfPerturb(-vViewPosition, normal, sUv, normalize(mix(vec3(0.,0.,1.), sN, uDetail)));`,
       )
       .replace(
         '#include <emissivemap_fragment>',
         /* glsl */ `#include <emissivemap_fragment>
-        if (sSheen > 0.0) { float fr = 1.0 - abs(dot(normal, normalize(vViewPosition))); totalEmissiveRadiance += diffuseColor.rgb * sSheen * fr * fr * fr * 0.55; }`,
+        if (sSheen > 0.0) { float fr = 1.0 - abs(dot(normal, normalize(vViewPosition))); totalEmissiveRadiance += diffuseColor.rgb * sSheen * fr * fr * fr * 0.42; }`,
       );
   };
-  m.customProgramCacheKey = () => 'surf-v2' + (params.emissive ? '-e' : '');
+  m.customProgramCacheKey = () => 'surf-v3' + (params.emissive ? '-e' : '');
   return m;
 }
 
@@ -316,9 +322,9 @@ export const Mat = {} as {
 
 export function initMaterials(tex: DetailTex) {
   Mat.vc = surfaceMaterial(tex);
-  Mat.vcSoft = surfaceMaterial(tex, { roughness: 0.92 });
-  Mat.vcPastel = surfaceMaterial(tex, { roughness: 0.4, emissive: new THREE.Color('#ffffff'), emissiveIntensity: 0.05 });
-  Mat.vcGlow = surfaceMaterial(tex, { roughness: 0.6, emissive: new THREE.Color('#ffcf8a'), emissiveIntensity: 2.0 });
+  Mat.vcSoft = surfaceMaterial(tex, { roughness: 0.94 });
+  Mat.vcPastel = surfaceMaterial(tex, { roughness: 0.34 });
+  Mat.vcGlow = surfaceMaterial(tex, { roughness: 0.68, emissive: new THREE.Color('#ffd394'), emissiveIntensity: 1.85 });
 }
 
 // ---------- shape helpers ----------
@@ -338,7 +344,7 @@ export function starShape(outer: number, inner: number, points = 5): THREE.Shape
 
 export function moonShape(r: number): THREE.Shape {
   const s = new THREE.Shape();
-  const seg = 8;
+  const seg = 12;
   const a0 = Math.PI / 3, a1 = (Math.PI * 5) / 3;
   for (let i = 0; i <= seg; i++) {
     const a = a0 + ((a1 - a0) * i) / seg;
@@ -364,14 +370,14 @@ export function extrude(shape: THREE.Shape, depth: number, bevel = 0.01): THREE.
     bevelEnabled: bevel > 0,
     bevelThickness: bevel,
     bevelSize: bevel,
-    bevelSegments: 3,
-    curveSegments: 10,
+    bevelSegments: 4,
+    curveSegments: 16,
   });
   g.center();
   return g;
 }
 
-/** Remove the vertex-normal discontinuities so a hull can be inflated along smooth normals. */
+/** Remove vertex-normal discontinuities so outline hulls inflate cleanly. */
 export function hullGeometry(src: THREE.BufferGeometry): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', (src.getAttribute('position') as THREE.BufferAttribute).clone());
@@ -382,40 +388,42 @@ export function hullGeometry(src: THREE.BufferGeometry): THREE.BufferGeometry {
 }
 
 export const C = {
-  // palette (soft pastels, matching the concept art)
-  wood: '#c99566',
-  woodLight: '#dcb284',
-  woodDark: '#9b6a45',
-  cream: '#f4e7d3',
-  creamWarm: '#f1dcc0',
-  white: '#fbf6ee',
-  lavender: '#a99bc9',
-  lavenderDeep: '#7f74a6',
-  dusk: '#8f86b6',
-  mint: '#a8d5bf',
-  mintDeep: '#86bfa6',
-  sage: '#a7b896',
-  peach: '#f2a988',
-  peachLight: '#f7c6aa',
-  pink: '#efb3b8',
-  rose: '#e58b95',
-  sky: '#9cc6e8',
-  blueGrey: '#8f9fbe',
-  yellow: '#f6d77d',
-  gold: '#e3b25e',
-  dog: '#e5b56f',
-  dogLight: '#f3d39c',
-  bear: '#a8754f',
-  bearLight: '#d4a77d',
-  skin: '#fbd0b8',
-  skinShade: '#f3bda3',
-  sleeve: '#eef0f7',
-  sweater: '#7f9ad6',
-  hair: '#6e4632',
-  pants: '#5d6a8a',
-  leaf: '#7fae7e',
-  leafDark: '#4f7d6a',
-  pot: '#e7c6a9',
-  red: '#e6595a',
-  blue: '#4f7fd1',
+  // v3 realistic interior palette (natural oaks, warm linen, muted sage, terracotta, brass)
+  wood: '#c28e5c',
+  woodLight: '#d4aa7d',
+  woodDark: '#8c5d3c',
+  cream: '#f2eadc',
+  creamWarm: '#eadcc6',
+  white: '#f8f4ec',
+  lavender: '#9a93ae',
+  lavenderDeep: '#766f8d',
+  dusk: '#7e7898',
+  mint: '#8da899',
+  mintDeep: '#708d7d',
+  sage: '#899b82',
+  peach: '#d89b7e',
+  peachLight: '#e5b398',
+  pink: '#dfb0ae',
+  rose: '#c87a7c',
+  sky: '#88abc9',
+  blueGrey: '#7a8ba3',
+  yellow: '#e3be68',
+  gold: '#c9a255',
+  brass: '#c9a255',
+  steel: '#b8bec6',
+  dog: '#d9a45b',
+  dogLight: '#edd09c',
+  bear: '#966542',
+  bearLight: '#c89b72',
+  skin: '#f6c7af',
+  skinShade: '#e8ad94',
+  sleeve: '#eceae4',
+  sweater: '#6f87b4',
+  hair: '#5c3b2a',
+  pants: '#4e5b75',
+  leaf: '#5e875c',
+  leafDark: '#3c6348',
+  pot: '#d8b79b',
+  red: '#d64c4a',
+  blue: '#436db8',
 };

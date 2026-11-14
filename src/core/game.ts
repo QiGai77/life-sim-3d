@@ -8,7 +8,7 @@ import { House, LAYOUT } from '../world/house';
 import { babyBottle } from '../world/props';
 import { heartSprite } from '../world/textures';
 import type { Interactable } from '../world/types';
-import { Baby } from '../player/baby';
+import { Baby, BabyAvatar } from '../player/baby';
 import { Hands } from '../player/hands';
 import { Needs } from '../systems/needs';
 import { Tasks, type Task } from '../systems/tasks';
@@ -31,6 +31,7 @@ export class Game {
   pixelRatio: number;
   post: Post;
   baby: Baby;
+  avatar: BabyAvatar;
   hands: Hands;
   house: House;
   parent: Parent;
@@ -56,10 +57,13 @@ export class Game {
   private hugTime = 0;
   private ballTouches = 0;
   private ballCooldown = 0;
+  private nudgeCd = 0;
+  private standingAt: Interactable | null = null;
+  private standingFrom: 'crib' | 'floor' = 'floor';
+  private standPrevPos = new THREE.Vector3();
   private rollCount = 0;
   private rollSign = 0;
   private rollTimer = 0;
-  private rollWarned = false;
   private cryCooldown = 0;
   private autoCry = 25;
   dogAwake = 0;
@@ -83,8 +87,8 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap; // r18x PCF is soft (shadow.radius)
 
-    this.scene.background = new THREE.Color('#d9c7df');
-    this.scene.fog = new THREE.Fog('#e6d3df', 7, 24);
+    this.scene.background = new THREE.Color('#d8e2eb');
+    this.scene.fog = new THREE.Fog('#e6ded5', 11, 34);
     // image-based lighting: CC0 Poly Haven HDRI (self-hosted) → PMREM, RoomEnvironment as fallback
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = assets.hdr ? pmrem.fromEquirectangular(assets.hdr).texture : pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -96,13 +100,41 @@ export class Game {
     this.scene.add(this.baby.camera);
     this.baby.camera.add(this.holdAnchor);
     this.hands = new Hands(this.baby.camera);
+    this.avatar = new BabyAvatar(this.scene);
 
     this.house = new House(this.scene, this.mobile ? 'low' : 'high');
+    this.house.onMirrorRender = (active) => this.avatar.setHeadVisible(active);
+    this.house.onClimbRequest = (i) => this.toggleClimb(i);
     this.parent = new Parent(this.scene, '妈妈', [new THREE.Vector3(2.2, 0, 1.6), new THREE.Vector3(4.9, 0, -1.6), new THREE.Vector3(5.1, 0, 2.55), new THREE.Vector3(1.6, 0, -1.2)]);
     this.dad = new Parent(this.scene, '爸爸', [new THREE.Vector3(5.6, 0, -2.4), new THREE.Vector3(3.4, 0, 2.6), new THREE.Vector3(1.8, 0, 2.3), new THREE.Vector3(5.6, 0, 2.2)]);
     this.dad.teleport(new THREE.Vector3(5.6, 0, -2.4), -2.4);
     this.dad.speed = 1.0;
     this.dad.idleTimer = 9;
+
+    this.house.addI({
+      id: 'mom_npc',
+      name: '妈妈',
+      kind: 'pet',
+      verb: '抱抱·展示',
+      obj: this.parent.human.root,
+      bottom: 0,
+      radius: 0.48,
+      enabled: true,
+      range: 2.2,
+      onUse: () => this.interactParent('mom'),
+    });
+    this.house.addI({
+      id: 'dad_npc',
+      name: '爸爸',
+      kind: 'pet',
+      verb: '举高高·展示',
+      obj: this.dad.human.root,
+      bottom: 0,
+      radius: 0.48,
+      enabled: true,
+      range: 2.2,
+      onUse: () => this.interactParent('dad'),
+    });
 
     this.bottle.visible = false;
     this.bottle.position.set(0.035, -0.115, -0.26);
@@ -143,6 +175,8 @@ export class Game {
     bus.on('allDone', () => {
       tweens.wait(1.8).then(() => this.finish());
     });
+    bus.on('babySpeech', (txt: string) => this.ui.speech('宝宝', txt, 1.8));
+    bus.on('tvSpeech', (txt: string) => this.ui.speech('电视', txt, 2.6));
     bus.on('pointerlock', () => {});
     document.getElementById('start-btn')!.addEventListener('click', () => this.start());
   }
@@ -198,15 +232,31 @@ export class Game {
     if (this.state !== 'play') return;
     switch (a) {
       case 'grab':
-        if (this.held) this.drop();
-        else if (this.hover && this.hover.kind === 'hold') this.pickUp(this.hover);
-        else if (this.hover && this.hover.kind === 'pet') this.pet(this.hover);
-        else {
+        if (this.held) {
+          if (this.hover && (this.hover.id === 'mom_npc' || this.hover.id === 'dad_npc')) {
+            this.hover.onUse?.();
+          } else if (this.hover && this.hover.kind === 'toggle') {
+            this.useInteractable(this.hover);
+          } else {
+            this.drop();
+          }
+        } else if (this.hover && this.hover.kind === 'hold') {
+          this.pickUp(this.hover);
+        } else if (this.hover && (this.hover.kind === 'toggle' || this.hover.kind === 'climb')) {
+          this.useInteractable(this.hover);
+        } else if (this.hover && this.hover.kind === 'pet') {
+          this.pet(this.hover);
+        } else {
           this.hands.reachTarget.set(0, 0.05, -0.4);
           this.hands.reachSide = Math.random() < 0.5 ? 0 : 1;
           this.hands.setPose('reach', 0.45);
           sfx.pop();
         }
+        break;
+      case 'throw':
+        if (this.held) this.throwHeld();
+        else if (this.hover && (this.hover.kind === 'toggle' || this.hover.kind === 'climb')) this.useInteractable(this.hover);
+        else if (this.hover && this.hover.kind === 'pet') this.pet(this.hover);
         break;
       case 'mouth':
         this.mouth();
@@ -218,6 +268,16 @@ export class Game {
         this.laugh();
         break;
     }
+  }
+
+  private useInteractable(i: Interactable) {
+    _v.copy(i.obj.getWorldPosition(new THREE.Vector3()));
+    this.baby.camera.worldToLocal(_v);
+    this.hands.reachTarget.copy(_v);
+    this.hands.reachSide = _v.x < 0 ? 0 : 1;
+    this.hands.setPose('reach', 0.35);
+    i.onUse?.();
+    this.needs.add('curious', 2);
   }
 
   private pickUp(i: Interactable) {
@@ -235,7 +295,8 @@ export class Game {
       sfx.chime();
       this.ui.speech('宝宝', '抓到星星啦！咯咯～', 2.2);
     }
-    if (i.isBall && i.vel) i.vel.set(0, 0, 0);
+    if (i.vel) i.vel.set(0, 0, 0);
+    if (i.angVel) i.angVel.set(0, 0, 0);
     this.needs.add('curious', 3);
     this.fun.onPickUp(i);
     const obj = i.obj;
@@ -250,6 +311,32 @@ export class Game {
       obj.quaternion.slerpQuaternions(q0, q1, e);
     });
     if (i.isBlock) tweens.wait(0.05).then(() => this.settleBlocks());
+  }
+
+  private throwHeld() {
+    const i = this.held;
+    if (!i) return;
+    this.held = null;
+    this.hugTime = 0;
+    const obj = i.obj;
+    this.house.root.attach(obj);
+    const dir = new THREE.Vector3();
+    this.baby.camera.getWorldDirection(dir);
+    dir.normalize();
+    const speed = i.isBall ? 3.2 : i.isSoft ? 2.1 : i.isCeramic ? 2.2 : 2.65;
+    const up = i.isSoft ? 1.1 : 1.45;
+    (i.vel ??= new THREE.Vector3()).copy(dir).multiplyScalar(speed);
+    i.vel.y += up;
+    (i.angVel ??= new THREE.Vector3()).set(
+      (Math.random() - 0.5) * 9,
+      (Math.random() - 0.5) * 9,
+      (Math.random() - 0.5) * 9,
+    );
+    this.hands.reachTarget.set(0, 0.02, -0.45);
+    this.hands.setPose('throw', 0.36);
+    sfx.whoosh();
+    this.needs.add('curious', 2);
+    if (i.isBall) this.fun.onBallKick();
   }
 
   private drop() {
@@ -337,10 +424,29 @@ export class Game {
       tweens.wait(0.3).then(() => sfx.chomp());
       tweens.wait(0.6).then(() => sfx.chomp());
       this.needs.add('curious', 4);
-      const lines: Record<string, string> = { teddy: '软软的，毛茸茸～', ball: '滑溜溜的球！', remote: '咬咬…咔哒！', duck: '嘎！小鸭子叫了！', rattle: '沙沙…甜甜的？' };
-      const line = i.isBlock ? '咬咬…硬邦邦的！' : i.isOrnament ? '叮～ 星星是凉凉的' : lines[i.id] ?? '咬咬～';
+      const lines: Record<string, string> = {
+        teddy: '软软的，毛茸茸～',
+        ball: '滑溜溜的球！',
+        remote: '咬咬…咔哒！',
+        duck: '嘎！小鸭子叫了！',
+        rattle: '沙沙…甜甜的？',
+        pacifier: '唔～最安心的奶嘴！',
+        mug: '凉凉的陶瓷杯沿…',
+        toycar: '木头小车咕噜噜～',
+        vase: '光滑的小花瓶～',
+        jar: '盖子甜甜的！好像有饼干！',
+      };
+      const line = i.isBlock
+        ? '咬咬…硬邦邦的！'
+        : i.isOrnament
+          ? '叮～ 星星是凉凉的'
+          : i.isSoft
+            ? '软乎乎暖烘烘的～'
+            : i.isBook
+              ? '厚厚的纸板书～'
+              : lines[i.id] ?? '咬咬～';
       this.ui.speech('宝宝', line, 1.8);
-      if (i.isTeddy) this.needs.add('love', 3);
+      if (i.isTeddy || i.isPacifier || i.isSoft) this.needs.add('love', 3);
     } else {
       sfx.coo();
       this.needs.add('sleep', 2);
@@ -353,6 +459,7 @@ export class Game {
     this.cryCooldown = 1.8;
     sfx.cry();
     this.hands.setPose('cry', 1.6);
+    this.avatar.setExpr('cry', 2.2);
     this.baby.shake = 0.01;
     this.ui.speech('宝宝', auto ? '呜…哇——！（忍不住哭了）' : '哇——！哇——！', 1.8);
     if (!auto && this.fun.onCry()) return;
@@ -366,6 +473,7 @@ export class Game {
   private laugh() {
     sfx.giggle();
     this.hands.setPose('clap', 1.0);
+    this.avatar.setExpr('laugh', 2.2);
     tweens.wait(0).then(() => this.fun.onLaugh());
     const d = this.parent.pos.distanceTo(_v.set(this.baby.pos.x, 0, this.baby.pos.z));
     const head = this.parent.headWorld(_v2);
@@ -387,6 +495,11 @@ export class Game {
 
   private pet(i: Interactable) {
     if (this.fun.onPet(i)) return;
+    if (i.onUse) {
+      this.hands.setPose('reach', 0.45);
+      i.onUse();
+      return;
+    }
     if (i.id !== 'dog') return;
     this.hands.setPose('pet', 1.5);
     this.dogAwake = 8;
@@ -400,6 +513,178 @@ export class Game {
     this.ui.speech('狗狗', '汪～（摇尾巴）', 2);
     tweens.wait(0.9).then(() => this.tasks.complete('dog'));
     bus.emit('pet', i.id);
+  }
+
+  /* ================= climb / stand & parent interaction ================= */
+
+  private toggleClimb(i: Interactable) {
+    if (this.state !== 'play' || !i.standAt) return;
+    if (this.baby.mode === 'stand' && this.standingAt === i) {
+      this.stepDown();
+      return;
+    }
+    if (this.baby.mode === 'crib' && i.id !== 'crib_stand') return;
+
+    const fromCrib = this.baby.mode === 'crib';
+    if (this.baby.mode !== 'stand') {
+      this.standingFrom = fromCrib ? 'crib' : 'floor';
+      this.standPrevPos.copy(this.baby.pos);
+    }
+    this.standingAt = i;
+
+    const targetPos = fromCrib
+      ? new THREE.Vector3(LAYOUT.cribEye.x, 0, LAYOUT.cribEye.z)
+      : new THREE.Vector3(i.standAt.x, 0, i.standAt.z);
+    const targetEye = fromCrib ? 0.78 : i.standAt.eye;
+
+    sfx.boing();
+    const p0 = this.baby.pos.clone();
+    const e0 = this.baby.eye;
+    this.baby.setStand(targetPos, targetEye);
+    if (i.id === 'beanbag') {
+      this.ui.speech('宝宝', '扑进软绵绵的懒人沙发！咻～', 2);
+      this.needs.add('love', 5);
+    } else if (i.id === 'sofa') {
+      this.ui.speech('宝宝', '扶着大沙发站高高啦！', 2);
+    } else if (i.id === 'armchair') {
+      this.ui.speech('宝宝', '扶着扶手站起来看看外面～', 2);
+    } else if (i.id === 'crib_stand') {
+      this.ui.speech('宝宝', '扶着床栏站起来了！好高呀～', 2);
+    }
+    this.needs.add('curious', 4);
+    tweens.run(0.32, (k) => {
+      const e = ease.out(k);
+      this.baby.pos.lerpVectors(p0, targetPos, e);
+      this.baby.eye = lerp(e0, targetEye, e) + (i.id === 'beanbag' ? Math.sin(k * Math.PI) * 0.08 : 0);
+    });
+  }
+
+  private stepDown() {
+    if (this.baby.mode !== 'stand') return;
+    const prev = this.standingFrom;
+    const back = this.standPrevPos.clone();
+    const curPos = this.baby.pos.clone();
+    const curEye = this.baby.eye;
+    this.standingAt = null;
+    sfx.pop();
+    if (prev === 'crib') {
+      this.baby.setCrib(LAYOUT.cribEye, this.baby.yaw);
+      const targetEye = LAYOUT.cribEye.y;
+      tweens.run(0.28, (k) => {
+        this.baby.eye = lerp(curEye, targetEye, ease.out(k));
+      });
+    } else {
+      this.baby.setFloor(back, this.baby.yaw);
+      tweens.run(0.28, (k) => {
+        const e = ease.out(k);
+        this.baby.pos.lerpVectors(curPos, back, e);
+        this.baby.eye = lerp(curEye, 0.4, e);
+      });
+    }
+  }
+
+  private async interactParent(who: 'mom' | 'dad') {
+    if (this.state !== 'play') return;
+    const p = who === 'mom' ? this.parent : this.dad;
+    if (p.busy) {
+      this.ui.speech(who === 'mom' ? '妈妈' : '爸爸', '等爸爸妈妈一下下哦～', 1.6);
+      return;
+    }
+    p.face(this.baby.camera.position);
+    const head = p.headWorld(new THREE.Vector3());
+
+    if (this.held) {
+      const item = this.held;
+      const itemName = item.name;
+      p.pose = 'cheer';
+      sfx.coo();
+      this.spawnHearts(head, 4);
+      this.needs.add('love', 8);
+      this.needs.add('curious', 4);
+      const reactMap: Record<string, string> = {
+        duck: '哎呀，小黄鸭真神气！嘎嘎嘎～',
+        teddy: '宝宝好喜欢熊熊呀，给它一个大拥抱～',
+        pacifier: '找到小奶嘴啦？宝宝自己拿着真棒！',
+        remote: '好家伙，又偷偷拿遥控器啦？别乱按哦～',
+        mug: '小心哦宝贝，这是装热茶的瓷杯～',
+        jar: '哈哈哈，小馋猫想要饼干罐里的曲奇吗？',
+        vase: '哇小心点，花瓶很光滑别摔着啦～',
+        toycar: '嘀嘀嘀～ 宝宝的木头小赛车好酷！',
+      };
+      const line =
+        item.isBlock
+          ? '宝宝抓着小积木呢，要不要试试叠高高？'
+          : item.isBook
+            ? `拿了一本《${itemName}》呀！晚上再给宝宝讲故事～`
+            : reactMap[item.id] ?? `哇，宝宝把${itemName}拿过来给我看啦！真厉害！`;
+      this.ui.speech(who === 'mom' ? '妈妈' : '爸爸', line, 2.6);
+      tweens.wait(1.6).then(() => {
+        if (!p.busy) p.pose = 'none';
+      });
+      return;
+    }
+
+    if (who === 'mom') {
+      p.pose = 'kneel';
+      sfx.giggle();
+      this.spawnHearts(head, 5);
+      this.needs.add('love', 14);
+      this.ui.speech('妈妈', '小宝贝真贴心～ 妈妈最爱你啦！', 2.4);
+      tweens.wait(1.8).then(() => {
+        if (!p.busy) p.pose = 'none';
+      });
+      return;
+    }
+
+    // Dad interactive "举高高" (lift up high!) when on floor/stand near Dad
+    if (this.baby.mode === 'crib') {
+      p.pose = 'wave';
+      sfx.coo();
+      this.spawnHearts(head, 4);
+      this.needs.add('love', 10);
+      this.ui.speech('爸爸', '嘿嘿，小家伙在婴儿床里精神得很呀！', 2.4);
+      tweens.wait(1.6).then(() => {
+        if (!p.busy) p.pose = 'none';
+      });
+      return;
+    }
+
+    this.state = 'cutscene';
+    p.busy = true;
+    p.pose = 'hold';
+    this.stepDown();
+    const savedPos = this.baby.pos.clone();
+    const savedEye = this.baby.eye;
+    const savedPitch = this.baby.pitch;
+    this.baby.mode = 'scripted';
+    sfx.boing();
+    this.ui.speech('爸爸', '嘿咻——飞高高喽！', 2.2);
+    this.spawnHearts(head, 5);
+    const cam = this.baby.camera;
+    const targetP = p.pos.clone().add(new THREE.Vector3(Math.sin(p.heading), 0, Math.cos(p.heading)).multiplyScalar(0.36));
+    await tweens.run(0.75, (k) => {
+      const e = ease.out(k);
+      cam.position.set(lerp(savedPos.x, targetP.x, e), lerp(savedEye, 1.52, e), lerp(savedPos.z, targetP.z, e));
+      cam.rotation.set(lerp(savedPitch, -0.18, e), this.baby.yaw, Math.sin(k * Math.PI) * 0.08);
+    });
+    sfx.giggle();
+    this.ui.speech('宝宝', '咯咯咯！好高呀！！', 1.8);
+    this.needs.add('love', 18);
+    this.needs.add('curious', 8);
+    await tweens.run(1.1, (k) => {
+      cam.position.y = 1.52 + Math.sin(k * Math.PI * 2) * 0.08;
+      cam.rotation.z = Math.sin(k * Math.PI * 2) * 0.06;
+    });
+    await tweens.run(0.6, (k) => {
+      const e = ease.inOut(k);
+      cam.position.set(lerp(targetP.x, savedPos.x, e), lerp(1.52, savedEye, e), lerp(targetP.z, savedPos.z, e));
+      cam.rotation.set(lerp(-0.18, savedPitch, e), this.baby.yaw, 0);
+    });
+    this.baby.setFloor(savedPos, this.baby.yaw);
+    this.baby.pitch = savedPitch;
+    p.pose = 'none';
+    p.busy = false;
+    this.state = 'play';
   }
 
   /* ================= parent care (cutscenes) ================= */
@@ -609,63 +894,140 @@ export class Game {
     }
   }
 
-  private updateBall(dt: number) {
-    const b = this.house.interactables.find((i) => i.isBall)!;
-    if (this.held === b || !b.vel || b.obj.userData.carried) return;
-    const p = b.obj.position;
-    const v = b.vel;
-    this.ballCooldown -= dt;
-    // baby bumps the ball
-    if (this.baby.mode === 'floor') {
-      const dx = p.x - this.baby.pos.x, dz = p.z - this.baby.pos.z;
-      const d = Math.hypot(dx, dz);
-      if (d < this.baby.radius + 0.11 + 0.06 && this.ballCooldown <= 0) {
-        this.ballCooldown = 0.6;
-        const s = 1.0 + this.baby.moving * 0.5;
-        v.set((dx / d) * s, 0, (dz / d) * s);
-        sfx.boing();
-        this.squash(b.obj, 0.25);
-        this.fun.onBallKick();
-        this.needs.add('curious', 4);
-        this.ballTouches++;
-        if (!this.tasks.isDone('ball')) {
-          if (this.ballTouches >= 2) {
-            this.tasks.complete('ball');
-            this.ui.speech('宝宝', '追到啦！嘿嘿～', 1.8);
-          } else {
-            this.tasks.setProgress('ball', `${this.ballTouches}/2`);
-            this.ui.speech('宝宝', '球球跑掉了！追！', 1.6);
+  private updateDynamicProps(dt: number) {
+    this.ballCooldown = Math.max(0, this.ballCooldown - dt);
+    this.nudgeCd = Math.max(0, this.nudgeCd - dt);
+
+    for (const item of this.house.interactables) {
+      if (item.kind !== 'hold' || this.held === item || item.obj.userData.carried || item.isOrnament) continue;
+      const p = item.obj.position;
+
+      // Baby bumps / nudges floor objects while crawling
+      if (this.baby.mode === 'floor' && p.y < 0.35) {
+        const r = Math.min(0.14, item.radius || 0.08);
+        const dx = p.x - this.baby.pos.x;
+        const dz = p.z - this.baby.pos.z;
+        const d = Math.hypot(dx, dz);
+        if (item.isBall && d < this.baby.radius + 0.11 + 0.06 && this.ballCooldown <= 0 && d > 1e-4) {
+          this.ballCooldown = 0.6;
+          const s = 1.0 + this.baby.moving * 0.5;
+          (item.vel ??= new THREE.Vector3()).set((dx / d) * s, 0.25, (dz / d) * s);
+          sfx.boing();
+          this.squash(item.obj, 0.25);
+          this.fun.onBallKick();
+          this.needs.add('curious', 4);
+          this.ballTouches++;
+          if (!this.tasks.isDone('ball')) {
+            if (this.ballTouches >= 2) {
+              this.tasks.complete('ball');
+              this.ui.speech('宝宝', '追到啦！嘿嘿～', 1.8);
+            } else {
+              this.tasks.setProgress('ball', `${this.ballTouches}/2`);
+              this.ui.speech('宝宝', '球球跑掉了！追！', 1.6);
+            }
+          }
+        } else if (
+          (item.id === 'cloth_ball' || item.id === 'toycar' || item.id === 'duck' || item.isBlock) &&
+          this.baby.moving > 0.25 &&
+          d < this.baby.radius + r + 0.04 &&
+          d > 1e-4 &&
+          this.nudgeCd <= 0
+        ) {
+          this.nudgeCd = 0.28;
+          const push = 0.7 + this.baby.moving * 0.5;
+          (item.vel ??= new THREE.Vector3()).set((dx / d) * push, 0.15, (dz / d) * push);
+          if (item.id === 'duck') sfx.squeak();
+          else if (item.id === 'toycar') sfx.tap();
+          else if (item.isSoft) sfx.rustle();
+        }
+      }
+
+      const v = item.vel;
+      if (!v) continue;
+      const speedSq = v.lengthSq();
+      const ground = (item.isBlock ? this.columnTop(p.x, p.z, item) : this.house.surfaceAt(p.x, p.z, p.y + 0.18)) + item.bottom + 0.001;
+      const airborne = p.y > ground + 0.004 || v.y > 0.02;
+      if (speedSq < 1e-4 && !airborne) {
+        v.set(0, 0, 0);
+        if (item.angVel) item.angVel.set(0, 0, 0);
+        continue;
+      }
+
+      if (airborne) v.y -= 9.8 * dt;
+      p.x += v.x * dt;
+      p.y += v.y * dt;
+      p.z += v.z * dt;
+
+      // Keep inside room bounds
+      p.x = clamp(p.x, -4.85, 6.85);
+      const minZ = p.x < 0 ? -2.35 : -3.35;
+      const maxZ = p.x < 0 ? 2.35 : 3.35;
+      if (p.z < minZ) { p.z = minZ; v.z = Math.abs(v.z) * 0.5; }
+      if (p.z > maxZ) { p.z = maxZ; v.z = -Math.abs(v.z) * 0.5; }
+
+      // Bounce off colliders horizontally
+      const colR = item.isBall ? 0.11 : Math.min(0.12, item.radius || 0.07);
+      for (const c of this.house.colliders) {
+        const cx = clamp(p.x, c.minX, c.maxX), cz = clamp(p.z, c.minZ, c.maxZ);
+        const dx = p.x - cx, dz = p.z - cz;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < colR * colR && d2 > 1e-8) {
+          const d = Math.sqrt(d2);
+          const nx = dx / d, nz = dz / d;
+          p.x = cx + nx * colR;
+          p.z = cz + nz * colR;
+          const vn = v.x * nx + v.z * nz;
+          if (vn < 0) {
+            const rest = item.isBall ? 1.7 : 1.35;
+            v.x -= rest * vn * nx;
+            v.z -= rest * vn * nz;
+            if (-vn > 0.45) {
+              if (item.isCeramic) sfx.clink();
+              else sfx.drop();
+            }
           }
         }
       }
-    }
-    const speed = v.length();
-    if (speed < 0.01) return;
-    p.x += v.x * dt;
-    p.z += v.z * dt;
-    v.multiplyScalar(Math.exp(-0.75 * dt));
-    // bounce off furniture/walls
-    const r = 0.11;
-    for (const c of this.house.colliders) {
-      const cx = clamp(p.x, c.minX, c.maxX), cz = clamp(p.z, c.minZ, c.maxZ);
-      const dx = p.x - cx, dz = p.z - cz;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < r * r && d2 > 1e-8) {
-        const d = Math.sqrt(d2);
-        const nx = dx / d, nz = dz / d;
-        p.x = cx + nx * r;
-        p.z = cz + nz * r;
-        const vn = v.x * nx + v.z * nz;
-        if (vn < 0) {
-          v.x -= 1.7 * vn * nx;
-          v.z -= 1.7 * vn * nz;
-          if (-vn > 0.4) sfx.drop();
+
+      const surf = (item.isBlock ? this.columnTop(p.x, p.z, item) : this.house.surfaceAt(p.x, p.z, p.y + 0.15)) + item.bottom + 0.001;
+      if (p.y <= surf) {
+        if (v.y < -0.55) {
+          const bounce = item.isBall ? 0.62 : item.isSoft ? 0.15 : 0.28;
+          v.y = -v.y * bounce;
+          if (item.isBall) sfx.boing();
+          else if (item.isCeramic) sfx.clink();
+          else if (item.isSoft || item.isBook) sfx.rustle();
+          else if (item.id === 'duck') sfx.squeak();
+          else sfx.drop();
+          this.squash(item.obj, item.isSoft ? 0.18 : 0.12);
+          v.x *= 0.72;
+          v.z *= 0.72;
+        } else {
+          v.y = 0;
         }
+        p.y = surf;
+        const dampRate = item.isBall ? 0.85 : 5.5;
+        v.x *= Math.exp(-dampRate * dt);
+        v.z *= Math.exp(-dampRate * dt);
+        if (item.isBall) {
+          const spd = Math.hypot(v.x, v.z);
+          if (spd > 0.02) {
+            const axis = _v.set(v.z, 0, -v.x).normalize();
+            item.obj.rotateOnWorldAxis(axis, (spd * dt) / 0.11);
+          }
+        } else if (v.lengthSq() < 0.02) {
+          v.set(0, 0, 0);
+          if (item.angVel) item.angVel.set(0, 0, 0);
+          item.obj.rotation.x = lerp(item.obj.rotation.x, 0, 0.45);
+          item.obj.rotation.z = lerp(item.obj.rotation.z, 0, 0.45);
+          if (item.isBlock) this.checkStack();
+        }
+      } else if (item.angVel) {
+        item.obj.rotation.x += item.angVel.x * dt;
+        item.obj.rotation.y += item.angVel.y * dt;
+        item.obj.rotation.z += item.angVel.z * dt;
       }
     }
-    p.y = this.house.surfaceAt(p.x, p.z, 0.2) + r;
-    const axis = _v.set(v.z, 0, -v.x).normalize();
-    b.obj.rotateOnWorldAxis(axis, (speed * dt) / r);
   }
 
   private updateDog(dt: number) {
@@ -730,28 +1092,31 @@ export class Game {
     for (const i of this.house.interactables) if (i.enabled && i !== this.held) objs.push(i.obj);
     const hits = this.raycaster.intersectObjects(objs, true);
     let found: Interactable | null = null;
+    const baseRange = this.baby.mode === 'crib' ? 1.1 : this.baby.mode === 'stand' ? 1.55 : 1.35;
     for (const h of hits) {
       if (h.object.userData.occluder) break;
       const i = h.object.userData.interactable as Interactable | undefined;
       if (!i) continue;
-      const range = i.kind === 'look' ? i.range ?? 3.5 : this.baby.mode === 'crib' ? 1.0 : 1.2;
+      const range = i.kind === 'look' ? i.range ?? 3.5 : Math.max(baseRange, i.range ?? baseRange);
       if (h.distance <= range) found = i;
       break;
     }
     // generous aim assist for small things: check a cone around the crosshair
     if (!found) {
-      let best = 0.2, bestI: Interactable | null = null;
+      let best = 0.22, bestI: Interactable | null = null;
       const fwd = cam.getWorldDirection(new THREE.Vector3());
       for (const i of this.house.interactables) {
         if (!i.enabled || i === this.held || i.kind === 'look') continue;
         const p = i.obj.getWorldPosition(_v);
-        if (i.isBlock || i.isBall) p.y += 0; else if (i.isTeddy) p.y += 0.18;
+        if (i.isBlock || i.isBall) p.y += 0;
+        else if (i.isTeddy) p.y += 0.18;
+        else if (i.id === 'mom_npc' || i.id === 'dad_npc') p.y += 0.85;
         const to = _v2.subVectors(p, cam.position);
         const d = to.length();
-        const range = this.baby.mode === 'crib' ? 1.0 : 1.2;
+        const range = Math.max(baseRange, i.range ?? baseRange);
         if (d > range) continue;
         const ang = to.normalize().angleTo(fwd);
-        const tol = Math.atan2(i.radius + 0.05, d);
+        const tol = Math.atan2(i.radius + 0.06, d);
         if (ang < tol && ang < best) {
           best = ang;
           bestI = i;
@@ -776,18 +1141,47 @@ export class Game {
     const holding = !!this.held;
     let label: string | null = null;
     let verb = holding ? '放下' : '抓';
-    if (i && i.kind === 'hold' && !holding) label = `抓住 · ${i.name}`;
-    else if (i && i.kind === 'pet' && !holding) {
-      verb = i.id === 'tissue' ? '抽一张' : i.id === 'musicbox' ? '按一下' : '摸摸';
-      label = `${verb} · ${i.name}`;
-    } else if (i && i.kind === 'hold' && holding && this.held?.isBlock && i.isBlock) {
-      label = `叠上去 · ${i.name}`;
-      verb = '叠上';
-    } else if (i && i.kind === 'look' && !holding && this.time - this.lookSeenAt < 2.5) label = `看看 · ${i.name}`;
-    else if (holding) label = null;
-    this.ui.target(label, !!i && i.kind !== 'look');
-    this.ui.setGrab(holding, verb);
-    this.ui.setReady('grab', !!i && i.kind !== 'look');
+    let actionable = false;
+
+    if (i && holding) {
+      if (i.id === 'mom_npc' || i.id === 'dad_npc') {
+        verb = '递给看';
+        label = `拿给${i.name}看 · ${this.held!.name}`;
+        actionable = true;
+      } else if (i.kind === 'hold' && this.held?.isBlock && i.isBlock) {
+        verb = '叠上';
+        label = `叠上去 · ${i.name}`;
+        actionable = true;
+      } else if (i.kind === 'toggle') {
+        verb = i.verb ?? '开关';
+        label = `${verb} · ${i.name}`;
+        actionable = true;
+      }
+    } else if (i && !holding) {
+      if (i.kind === 'hold') {
+        label = `抓住 · ${i.name}`;
+        actionable = true;
+      } else if (i.kind === 'toggle') {
+        verb = i.verb ?? '互动';
+        label = `${verb} · ${i.name}`;
+        actionable = true;
+      } else if (i.kind === 'climb') {
+        verb = this.baby.mode === 'stand' && this.standingAt === i ? '蹲下' : i.verb ?? '扶站';
+        label = `${verb} · ${i.name}`;
+        actionable = true;
+      } else if (i.kind === 'pet') {
+        verb =
+          i.verb ??
+          (i.id === 'tissue' ? '抽一张' : i.id === 'musicbox' ? '按一下' : i.id === 'mirror' ? '摸摸镜子' : i.id === 'books' ? '翻翻看' : '摸摸');
+        label = `${verb} · ${i.name}`;
+        actionable = true;
+      } else if (i.kind === 'look' && this.time - this.lookSeenAt < 2.5) {
+        label = `看看 · ${i.name}`;
+      }
+    }
+    this.ui.target(label, actionable);
+    this.ui.setGrab(holding && !actionable, verb);
+    this.ui.setReady('grab', actionable);
   }
 
   private updateHint() {
@@ -800,6 +1194,10 @@ export class Game {
       this.ui.hint('点击画面开始（锁定鼠标转头）');
       return;
     }
+    if (this.baby.mode === 'stand') {
+      this.ui.hint(this.mobile ? '扶着站起来啦！推动摇杆或再按一次蹲下' : '扶着站起来啦！按 W/A/S/D 移动或按 E 蹲下');
+      return;
+    }
     const cur = this.tasks.current();
     if (this.held?.isTeddy && !this.tasks.isDone('hug')) {
       this.ui.hint('抱紧泰迪熊～');
@@ -810,15 +1208,19 @@ export class Game {
       return;
     }
     if (this.held?.id === 'remote') {
-      this.ui.hint('遥控器…想放进嘴里咬一咬？');
+      this.ui.hint('遥控器…想放进嘴里咬一咬，或按右键/Q扔出去？');
       return;
     }
     if (this.held?.isBlock && !this.tasks.isDone('stack')) {
-      this.ui.hint(this.mobile ? '对准另一块积木按「抓」叠上去' : '对准另一块积木点 左键 叠上去');
+      this.ui.hint(this.mobile ? '对准另一块积木按「抓」叠上去' : '对准另一块积木点 左键 叠上去（右键/Q 可抛投）');
+      return;
+    }
+    if (this.held) {
+      this.ui.hint(this.mobile ? `拿着 ${this.held.name}：可放嘴里、找爸妈展示或放下` : `拿着 ${this.held.name}：左键放下 · 右键/Q 抛出 · F 放嘴里`);
       return;
     }
     if (!cur) {
-      this.ui.hint('自由玩耍时间！');
+      this.ui.hint('自由玩耍时间！所有抽屉、柜门、灯、窗帘、电视和玩具都能互动～');
       return;
     }
     if (cur.id === 'roll' && this.baby.mode === 'crib' && this.rollCount > 0) {
@@ -849,15 +1251,6 @@ export class Game {
       const s = Math.sign(mx);
       if (s !== this.rollSign) {
         this.rollSign = s;
-        const ready = this.tasks.isDone('star') && this.tasks.isDone('milk') && this.tasks.isDone('hug');
-        if (!ready) {
-          if (!this.rollWarned) {
-            this.rollWarned = true;
-            this.ui.toast('先完成前面的任务，再来翻身吧', 'info', 2200);
-            tweens.wait(6).then(() => (this.rollWarned = false));
-          }
-          return;
-        }
         this.rollCount++;
         this.rollTimer = 1.6;
         this.baby.shake = 0.006;
@@ -947,10 +1340,14 @@ export class Game {
       }
     }
     const moveInput = this.state === 'play' ? this.input.move : { x: 0, y: 0 };
+    if (this.baby.mode === 'stand' && Math.hypot(moveInput.x, moveInput.y) > 0.35) {
+      this.stepDown();
+    }
     this.baby.update(dt, moveInput, this.house.colliders, this.time);
+    this.avatar.update(dt, this.baby, this.time);
 
     this.updateHover();
-    this.updateBall(dt);
+    this.updateDynamicProps(dt);
     this.updateDog(dt);
     this.updateHearts(dt);
     this.fun.update(dt);
@@ -973,6 +1370,7 @@ export class Game {
 
     // post fx: baby vision
     const u = this.post.vision.uniforms;
+    if (u.time) u.time.value = this.time;
     if (this.state !== 'cutscene') u.sleepy.value = lerp(u.sleepy.value, clamp((30 - this.needs.v.sleep) / 30, 0, 1), 1 - Math.exp(-2 * dt));
     this.updateHint();
     sfx.updateMusic(dt);

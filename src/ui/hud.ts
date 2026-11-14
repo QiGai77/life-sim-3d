@@ -130,8 +130,8 @@ export class UI {
     ($('rotate').querySelector('.rot-ico') as HTMLElement).innerHTML = ICON.rotate;
     $('cover-art').innerHTML = COVER_ART;
     $('start-tip').innerHTML = touch
-      ? '左边拖动：爬行　右边滑动：转头<br/>右下：抓 · 嘴 · 哭 · 笑　右上：成长记录本'
-      : '鼠标：转头　WASD：爬行　左键/E：抓·放<br/>F：放进嘴里　空格：哭　R：笑　Tab：记录本';
+      ? '左边拖动：爬行　右边滑动：转头<br/>右下：抓·互动 / 嘴 / 哭 / 笑　右上：成长记录本'
+      : '鼠标：转头　WASD：爬行/翻身　左键/E：抓·互动　右键/Q：抛出<br/>F：放进嘴里　空格：哭　R：笑　Tab：记录本';
     this.checkOrientation();
     window.addEventListener('resize', () => this.checkOrientation());
     window.addEventListener('orientationchange', () => setTimeout(() => this.checkOrientation(), 200));

@@ -3,6 +3,7 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { assets } from '../core/assets';
 import { damp } from '../core/events';
+import { skinNormalTex } from './textures';
 
 /**
  * A believable rigged human built from a CC0 Quaternius glTF (see docs/CREDITS.md):
@@ -192,19 +193,56 @@ export class Human {
     const tex = assets.tex;
     const knit = tex.knitNor.clone();
     knit.repeat.set(6, 6);
+    const skinNor = skinNormalTex();
+    skinNor.repeat.set(5, 5);
+    const fabricNor = tex.velvetNor.clone();
+    fabricNor.repeat.set(6, 6);
     const mats = new Map<string, THREE.Material>();
     const makeMat = (name: string): THREE.Material => {
       if (mats.has(name)) return mats.get(name)!;
       const col = new THREE.Color(style.colors[name] ?? '#cccccc');
       let m: THREE.Material;
       if (style.skin?.includes(name)) {
-        m = new THREE.MeshPhysicalMaterial({ color: col, roughness: 0.55, sheen: 0.6, sheenColor: new THREE.Color('#ff8f7a'), sheenRoughness: 0.5, envMapIntensity: 0.8 });
+        const pm = new THREE.MeshPhysicalMaterial({
+          color: col,
+          roughness: 0.5,
+          normalMap: skinNor,
+          normalScale: new THREE.Vector2(0.22, 0.22),
+          sheen: 0.65,
+          sheenColor: new THREE.Color('#ff9d88'),
+          sheenRoughness: 0.45,
+          clearcoat: 0.08,
+          clearcoatRoughness: 0.55,
+          envMapIntensity: 0.9,
+        });
+        pm.onBeforeCompile = (sh) => {
+          sh.fragmentShader = sh.fragmentShader.replace(
+            '#include <lights_fragment_end>',
+            `#include <lights_fragment_end>
+            float rim = 1.0 - abs(dot(normal, normalize(vViewPosition)));
+            reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.22, 0.065, 0.04) * (0.5 + 0.5 * rim);`,
+          );
+        };
+        m = pm;
       } else if (style.hair?.includes(name)) {
-        m = new THREE.MeshPhysicalMaterial({ color: col, roughness: 0.45, sheen: 0.5, sheenColor: col.clone().offsetHSL(0, 0, 0.2), sheenRoughness: 0.35 });
+        m = new THREE.MeshPhysicalMaterial({
+          color: col,
+          roughness: 0.42,
+          sheen: 0.65,
+          sheenColor: col.clone().offsetHSL(0, 0, 0.22),
+          sheenRoughness: 0.32,
+          anisotropy: 0.35,
+        });
       } else if (style.eyes?.includes(name)) {
-        m = new THREE.MeshStandardMaterial({ color: col, roughness: 0.15 });
+        m = new THREE.MeshPhysicalMaterial({ color: col, roughness: 0.06, clearcoat: 1.0, clearcoatRoughness: 0.05, envMapIntensity: 1.3 });
       } else {
-        m = new THREE.MeshStandardMaterial({ color: col, roughness: 0.88, normalMap: style.knit?.includes(name) ? knit : null, normalScale: new THREE.Vector2(0.8, 0.8) });
+        const isKnit = style.knit?.includes(name);
+        m = new THREE.MeshStandardMaterial({
+          color: col,
+          roughness: isKnit ? 0.92 : 0.85,
+          normalMap: isKnit ? knit : fabricNor,
+          normalScale: new THREE.Vector2(isKnit ? 0.85 : 0.55, isKnit ? 0.85 : 0.55),
+        });
       }
       m.name = name;
       mats.set(name, m);

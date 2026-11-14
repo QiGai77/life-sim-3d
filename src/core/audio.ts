@@ -145,6 +145,20 @@ class Synth {
   tissue() {
     this.noise(0.22, 0.18, 2400, 0.8, 0, 'bandpass', 5000);
   }
+  tap() {
+    this.tone(420, 0.06, 'triangle', 0.12, 0, 220);
+    this.noise(0.03, 0.08, 1800, 1.2, 0, 'bandpass');
+  }
+  rustle() {
+    this.noise(0.16, 0.12, 2200, 0.9, 0, 'bandpass', 3600);
+  }
+  clink() {
+    this.tone(1750, 0.14, 'sine', 0.09, 0, 1550);
+    this.tone(2640, 0.11, 'sine', 0.04, 0.01, 2400);
+  }
+  whoosh() {
+    this.noise(0.14, 0.11, 500, 0.8, 0, 'bandpass', 1400);
+  }
   squeak() {
     this.tone(1300, 0.09, 'square', 0.05, 0, 1900);
     this.tone(1700, 0.14, 'square', 0.05, 0.1, 1100);

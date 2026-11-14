@@ -20,7 +20,7 @@ export class Fun {
   private laughTimes: number[] = [];
   private momLaughs: number[] = [];
   private mirrorSeen = { laugh: false, cry: false };
-  private mirrorExpr = 0;
+  private nearMirror = false;
   private rattleCount = 0;
   private rattleDir = 0;
   private rattleCd = 0;
@@ -70,6 +70,20 @@ export class Fun {
         tweens.wait(1.2).then(() => this.lick());
       }
     }
+    if (i.id === 'mirror') {
+      sfx.tap();
+      g.hands.setPose('reach', 0.35);
+      g.ui.speech('宝宝', '镜子里有个真实的我！', 1.8);
+      g.needs.add('curious', 3);
+      return true;
+    }
+    if (i.id === 'books') {
+      sfx.rustle();
+      g.hands.setPose('reach', 0.35);
+      g.ui.speech('宝宝', '好多五颜六色的绘本～', 1.8);
+      g.needs.add('curious', 3);
+      return true;
+    }
     return false;
   }
 
@@ -86,6 +100,18 @@ export class Fun {
       g.ui.speech('宝宝', '沙沙沙～', 1.4);
     }
     if (i.id === 'remote') g.ui.speech('宝宝', '好多按钮…想咬一口', 1.8);
+    if (i.isPacifier) {
+      sfx.pop();
+      g.ui.speech('宝宝', '最喜欢的安抚奶嘴～', 1.6);
+    }
+    if (i.id === 'toycar') {
+      sfx.tap();
+      g.ui.speech('宝宝', '嘀嘀～小木车！', 1.5);
+    }
+    if (i.isBook) {
+      sfx.rustle();
+      g.ui.speech('宝宝', '厚纸板小画书！', 1.5);
+    }
   }
 
   onMouth(i: Interactable | null) {
@@ -93,17 +119,48 @@ export class Fun {
     if (i?.id === 'remote') {
       tweens.wait(0.6).then(() => {
         const h = g.house;
-        h.tvOn = !h.tvOn;
+        h.cycleTV(false);
         if (h.tvOn) {
-          sfx.tvOn();
-          g.ui.speech('电视', '♪ 小兔跳跳，跳到东来跳到西～', 3);
           this.eggs.discover('tv');
-          tweens.wait(1.2).then(() => this.parentLine('爸爸', '哈哈，宝宝自己打开电视啦？'));
-        } else sfx.click();
+          tweens.wait(1.2).then(() => this.parentLine('爸爸', '哈哈，宝宝自己换台啦？'));
+        }
       });
     }
     if (i?.id === 'duck') tweens.wait(0.4).then(() => sfx.squeak());
     if (i?.id === 'rattle') tweens.wait(0.3).then(() => sfx.rattle());
+    if (i?.isPacifier) {
+      tweens.wait(0.35).then(() => {
+        sfx.slurp();
+        g.needs.add('love', 8);
+        g.needs.add('sleep', 6);
+        g.ui.speech('宝宝', '唔…吸奶嘴好安心～', 1.8);
+      });
+    }
+    if (i?.id === 'mug') {
+      tweens.wait(0.35).then(() => {
+        sfx.slurp();
+        g.ui.speech('宝宝', '杯口凉凉的…爸爸的咖啡味道！', 1.8);
+        g.needs.add('curious', 4);
+      });
+    }
+    if (i?.isSoft) {
+      tweens.wait(0.35).then(() => {
+        sfx.rustle();
+        g.ui.speech('宝宝', '软绵绵毛茸茸的～', 1.5);
+      });
+    }
+    if (i?.isBook) {
+      tweens.wait(0.35).then(() => {
+        sfx.rustle();
+        g.ui.speech('宝宝', '纸角啃起来沙沙响～', 1.6);
+      });
+    }
+    if (i?.id === 'toycar') {
+      tweens.wait(0.35).then(() => {
+        sfx.tap();
+        g.ui.speech('宝宝', '木头小轮子圆圆的！', 1.5);
+      });
+    }
   }
 
   /** returns true when the cry was "handled" (mum doesn't need to come) */
@@ -181,24 +238,14 @@ export class Fun {
         s.m.rotation.z = (Math.random() - 0.5) * 0.4;
       }
     }
-    // mirror: show the baby's reflection when crawling up to it
+    // mirror: track when baby is close and looking at the real Reflector mirror
     const h = g.house;
     const mp = h.mirror.getWorldPosition(_v);
     const cam = g.baby.camera;
-    const near = g.baby.mode === 'floor' && Math.hypot(cam.position.x - mp.x, cam.position.z - mp.z) < 1.7 && this.visible(mp.clone().setY(0.4), 2);
-    const fm = h.mirrorFace.material as THREE.MeshBasicMaterial;
-    fm.opacity = THREE.MathUtils.damp(fm.opacity, near ? 0.92 : 0, 6, dt);
-    if (near) {
-      // the reflection follows the baby sideways a little
-      const lx = THREE.MathUtils.clamp(-(cam.position.x - mp.x) * 0.5, -0.17, 0.17);
-      h.mirrorFace.position.x = lx;
-      h.mirrorFace.position.y = 0.36 + Math.sin(this.t * 1.6) * 0.004;
-    }
-    this.mirrorExpr -= dt;
-    if (this.mirrorExpr <= 0 && fm.map !== h.mirrorTex.neutral) {
-      fm.map = h.mirrorTex.neutral;
-      fm.needsUpdate = true;
-    }
+    this.nearMirror =
+      g.baby.mode !== 'scripted' &&
+      Math.hypot(cam.position.x - mp.x, cam.position.z - mp.z) < 1.9 &&
+      this.visible(mp.clone().setY(0.45), 2.3);
     // music box spinner
     const sp = h.musicBox.getObjectByName('spinner');
     if (sp && this.spinT > 0) {
@@ -310,12 +357,8 @@ export class Fun {
   }
 
   private mirrorReact(kind: 'laugh' | 'cry') {
-    const h = this.g.house;
-    const fm = h.mirrorFace.material as THREE.MeshBasicMaterial;
-    if (fm.opacity < 0.5) return;
-    fm.map = h.mirrorTex[kind];
-    fm.needsUpdate = true;
-    this.mirrorExpr = 1.8;
+    if (!this.nearMirror) return;
+    this.g.avatar.setExpr(kind, 2.2);
     this.mirrorSeen[kind] = true;
     this.g.ui.speech('宝宝', kind === 'laugh' ? '镜子里的宝宝也在笑！' : '咦…镜子里的宝宝也哭了？', 2);
     if (this.mirrorSeen.laugh && this.mirrorSeen.cry) this.eggs.discover('mirror');

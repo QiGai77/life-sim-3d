@@ -1,6 +1,6 @@
 import { bus } from './events';
 
-export type Action = 'grab' | 'mouth' | 'cry' | 'laugh' | 'board';
+export type Action = 'grab' | 'throw' | 'mouth' | 'cry' | 'laugh' | 'board';
 
 /**
  * Unified input: virtual joystick + drag-to-look on touch, pointer-lock + WASD on desktop.
@@ -48,6 +48,7 @@ export class Input {
       }
       if (k === 'KeyR') bus.emit('action', 'laugh');
       if (k === 'KeyE') bus.emit('action', 'grab');
+      if (k === 'KeyQ') bus.emit('action', 'throw');
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
@@ -64,7 +65,7 @@ export class Input {
     window.addEventListener('mousedown', (e) => {
       if (!this.locked || !this.enabled) return;
       if (e.button === 0) bus.emit('action', 'grab');
-      if (e.button === 2) bus.emit('action', 'grab');
+      if (e.button === 2) bus.emit('action', 'throw');
     });
     window.addEventListener('contextmenu', (e) => e.preventDefault());
     this.layoutJoy();

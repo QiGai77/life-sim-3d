@@ -57,15 +57,19 @@ export class Dog {
           const src = m.material as THREE.MeshStandardMaterial;
           let mat = mats.get(src.name);
           if (!mat) {
-            const isFur = /Main/.test(src.name);
+            const isFur = /Main|Light|White|Brown|Orange/.test(src.name);
+            const isGloss = /Black|Eye|Nose/.test(src.name);
             mat = new THREE.MeshPhysicalMaterial({
               color: src.color.clone().multiplyScalar(src.name === 'Main' ? 1.02 : 1),
-              roughness: isFur ? 0.9 : 0.25,
-              sheen: isFur ? 0.8 : 0,
+              roughness: isGloss ? 0.1 : isFur ? 0.92 : 0.45,
+              clearcoat: isGloss ? 0.95 : 0,
+              clearcoatRoughness: isGloss ? 0.08 : 0,
+              sheen: isFur ? 0.85 : 0,
               sheenColor: new THREE.Color('#fff0dc'),
-              sheenRoughness: 0.6,
+              sheenRoughness: 0.55,
               normalMap: isFur ? fur : null,
-              normalScale: new THREE.Vector2(0.6, 0.6),
+              normalScale: new THREE.Vector2(0.65, 0.65),
+              envMapIntensity: isGloss ? 1.2 : 0.9,
             });
             mat.name = src.name;
             mats.set(src.name, mat);
