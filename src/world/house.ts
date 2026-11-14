@@ -1422,48 +1422,10 @@ export class House {
   lampBase = 1;
 
   private buildBeams() {
+    // Sunlight shafts are handled naturally via window RectAreaLight portals + directional shadows + drifting backlit dust motes.
+    // Avoiding giant alpha-blended beam quads prevents GTAOPass from treating translucent planes as dark wall occluders.
     const dir = this.sun.target.position.clone().sub(this.sun.position).normalize();
-    const beamMat = new THREE.MeshBasicMaterial({
-      map: T.beamTex(),
-      transparent: true,
-      opacity: 0.16,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      fog: false,
-    });
-    const makeBeam = (x0: number, x1: number, y0: number, y1: number, z: number) => {
-      const corners = [
-        new THREE.Vector3(x0, y0, z), new THREE.Vector3(x1, y0, z),
-        new THREE.Vector3(x1, y1, z), new THREE.Vector3(x0, y1, z),
-      ];
-      const far = corners.map((c) => c.clone().add(dir.clone().multiplyScalar(c.y / -dir.y)));
-      const pos: number[] = [], uv: number[] = [];
-      const face = (a: number, b: number) => {
-        const A = corners[a], B = corners[b], Cc = far[b], D = far[a];
-        pos.push(A.x, A.y, A.z, B.x, B.y, B.z, Cc.x, Cc.y, Cc.z, A.x, A.y, A.z, Cc.x, Cc.y, Cc.z, D.x, D.y, D.z);
-        uv.push(0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0);
-      };
-      face(0, 1);
-      face(1, 2);
-      face(2, 3);
-      face(3, 0);
-      const mA = corners[0].clone().lerp(corners[1], 0.5), mB = corners[3].clone().lerp(corners[2], 0.5);
-      const mC = far[3].clone().lerp(far[2], 0.5), mD = far[0].clone().lerp(far[1], 0.5);
-      pos.push(mA.x, mA.y, mA.z, mB.x, mB.y, mB.z, mC.x, mC.y, mC.z, mA.x, mA.y, mA.z, mC.x, mC.y, mC.z, mD.x, mD.y, mD.z);
-      uv.push(0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0);
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-      const m = new THREE.Mesh(g, beamMat.clone());
-      m.renderOrder = 5;
-      this.root.add(m);
-      this.beams.push(m);
-    };
     const { nWindow: NW, lWindow: LW } = LAYOUT;
-    makeBeam(NW.x0 + 0.05, NW.x1 - 0.05, NW.y0 + 0.05, NW.y1 - 0.05, LAYOUT.nursery.minZ);
-    makeBeam(LW.x0 + 0.05, LW.x1 - 0.05, LW.y0 + 0.05, LW.y1 - 0.05, LAYOUT.living.minZ);
-
     const n = 140;
     const pos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
@@ -1524,12 +1486,11 @@ export class House {
       if (this.lampMats[i]) this.lampMats[i].emissiveIntensity = damp(this.lampMats[i].emissiveIntensity, this.lampStates[i] ? 1.45 : 0, 10, dt);
     });
 
-    // sun beams respond to curtains being open/closed
+    // window RectAreaLight portals respond to curtains being open/closed
     const nOpen = (this.nurseryCurtainOpen[0] ? 0.5 : 0.1) + (this.nurseryCurtainOpen[1] ? 0.5 : 0.1);
     const lOpen = (this.livingCurtainOpen[0] ? 0.5 : 0.1) + (this.livingCurtainOpen[1] ? 0.5 : 0.1);
-    const baseOp = THREE.MathUtils.lerp(0.15, 0.25, this.dayK);
-    if (this.beams[0]) (this.beams[0].material as THREE.MeshBasicMaterial).opacity = damp((this.beams[0].material as THREE.MeshBasicMaterial).opacity, baseOp * nOpen, 6, dt);
-    if (this.beams[1]) (this.beams[1].material as THREE.MeshBasicMaterial).opacity = damp((this.beams[1].material as THREE.MeshBasicMaterial).opacity, baseOp * lOpen, 6, dt);
+    if (this.areaLights[0]) this.areaLights[0].intensity = damp(this.areaLights[0].intensity, THREE.MathUtils.lerp(2.6, 1.8, this.dayK) * nOpen, 6, dt);
+    if (this.areaLights[1]) this.areaLights[1].intensity = damp(this.areaLights[1].intensity, THREE.MathUtils.lerp(2.9, 2.0, this.dayK) * lOpen, 6, dt);
   }
 
   surfaceAt(x: number, z: number, maxY = 5): number {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { C, paint, boxUV } from '../world/lowpoly';
+import { C, boxUV } from '../world/lowpoly';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { damp } from '../core/events';
 import { assets } from '../core/assets';
@@ -91,17 +91,31 @@ function skinPart(
   pos: [number, number, number],
   rot: [number, number, number] = [0, 0, 0],
   scale: [number, number, number] = [1, 1, 1],
-  variation = 0.025,
+  variation = 0.015,
+  _crease = 0.45,
 ) {
-  const g = paint(geo, color, { variation, crease: 1.35 });
+  void _crease;
+  // Preserve analytic smooth normals of capsules/spheres/cylinders rather than flattening edges
+  const g = geo.index ? geo.toNonIndexed() : geo.clone();
+  for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+  if (!g.getAttribute('normal')) g.computeVertexNormals();
   const m = new THREE.Matrix4().compose(new THREE.Vector3(...pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...rot)), new THREE.Vector3(...scale));
   g.applyMatrix4(m);
-  const n = g.getAttribute('position').count;
+  const posAttr = g.getAttribute('position') as THREE.BufferAttribute;
+  const n = posAttr.count;
+  const base = new THREE.Color(color);
+  const cols = new Float32Array(n * 3);
   const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
   for (let i = 0; i < n; i++) {
+    const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+    const tone = 1 + Math.sin(x * 38 + y * 29 + z * 33) * variation * 0.4;
+    cols[i * 3] = base.r * tone;
+    cols[i * 3 + 1] = base.g * tone;
+    cols[i * 3 + 2] = base.b * tone;
     si[i * 4] = bone;
     sw[i * 4] = 1;
   }
+  g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
   g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
   g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
   boxUV(g);
@@ -133,23 +147,22 @@ function buildHand(side: 1 | -1): HandRig {
   const sph = (r: number) => new THREE.SphereGeometry(r, 24, 16);
   const capg = (r: number, l: number) => new THREE.CapsuleGeometry(r, l, 8, 16);
 
-  // Forearm & baby wrist crease (bound to forearm bone 0)
-  skinParts.push(skinPart(capg(0.036, 0.125), skin, 0, [0, -0.005, 0.118], [Math.PI / 2, 0, 0]));
-  skinParts.push(skinPart(sph(0.0345), C.skinShade, 0, [0, -0.004, 0.044], [0, 0, 0], [1.14, 0.84, 0.62]));
-  skinParts.push(skinPart(sph(0.0325), flush, 0, [0, -0.006, 0.025], [0, 0, 0], [1.1, 0.82, 0.55]));
+  // Forearm & smooth wrist transition (bound to forearm bone 0)
+  skinParts.push(skinPart(capg(0.036, 0.145), skin, 0, [0, -0.004, 0.105], [Math.PI / 2, 0, 0], [1.06, 1, 0.82], 0.015, 0.35));
+  skinParts.push(skinPart(sph(0.0335), '#f2bfa9', 0, [0, -0.004, 0.032], [0, 0, 0], [1.14, 0.72, 0.65], 0.012, 0.25));
 
   // Knitted ribbed cuff & soft cotton sleeve (bound to forearm bone 0)
-  sleeveParts.push(skinPart(new THREE.CylinderGeometry(0.045, 0.048, 0.038, 28), '#f3efe7', 0, [0, -0.005, 0.195], [Math.PI / 2, 0, 0], [1, 1, 1], 0.015));
-  sleeveParts.push(skinPart(new THREE.TorusGeometry(0.046, 0.006, 10, 28), '#e8e2d7', 0, [0, -0.005, 0.178], [0, 0, 0], [1, 0.9, 1], 0.01));
-  sleeveParts.push(skinPart(new THREE.CylinderGeometry(0.048, 0.058, 0.25, 28), C.sleeve, 0, [0, -0.005, 0.335], [Math.PI / 2, 0, 0], [1, 1, 1], 0.02));
+  sleeveParts.push(skinPart(new THREE.CylinderGeometry(0.045, 0.048, 0.038, 28), '#f3efe7', 0, [0, -0.005, 0.195], [Math.PI / 2, 0, 0], [1, 1, 1], 0.015, 0.6));
+  sleeveParts.push(skinPart(new THREE.TorusGeometry(0.046, 0.006, 10, 28), '#e8e2d7', 0, [0, -0.005, 0.178], [0, 0, 0], [1, 0.9, 1], 0.01, 0.5));
+  sleeveParts.push(skinPart(new THREE.CylinderGeometry(0.048, 0.058, 0.25, 28), C.sleeve, 0, [0, -0.005, 0.335], [Math.PI / 2, 0, 0], [1, 1, 1], 0.02, 0.6));
 
   // Sculpted palm (bound to wrist bone 1)
-  skinParts.push(skinPart(sph(0.04), skin, 1, [0, 0.001, -0.004], [0, 0, 0], [1.15, 0.54, 1.02]));
+  skinParts.push(skinPart(sph(0.041), skin, 1, [0, 0.001, -0.002], [0, 0, 0], [1.16, 0.55, 1.06], 0.014, 0.35));
   // dorsal knuckle bridge
-  skinParts.push(skinPart(sph(0.029), knuckleCol, 1, [0, 0.005, -0.034], [0, 0, 0], [1.44, 0.58, 0.68]));
+  skinParts.push(skinPart(sph(0.03), knuckleCol, 1, [0, 0.004, -0.034], [0, 0, 0], [1.42, 0.56, 0.7], 0.012, 0.3));
   // palmar arch & thenar/hypothenar pads
-  skinParts.push(skinPart(sph(0.025), palmCol, 1, [-0.025 * side, -0.012, -0.006], [0, 0.25 * side, 0], [0.95, 0.62, 1.2]));
-  skinParts.push(skinPart(sph(0.021), palmCol, 1, [0.024 * side, -0.01, -0.012], [0, -0.15 * side, 0], [0.85, 0.58, 1.15]));
+  skinParts.push(skinPart(sph(0.025), palmCol, 1, [-0.024 * side, -0.011, -0.006], [0, 0.25 * side, 0], [0.95, 0.62, 1.2], 0.012, 0.3));
+  skinParts.push(skinPart(sph(0.021), palmCol, 1, [0.024 * side, -0.009, -0.012], [0, -0.15 * side, 0], [0.85, 0.58, 1.15], 0.012, 0.3));
 
   // 4 fingers, each with 3 phalanx bones (prox, mid, dist)
   const lens = [0.028, 0.037, 0.034, 0.025];
@@ -185,26 +198,34 @@ function buildHand(side: 1 | -1): HandRig {
     const mDist = mMid.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -len * 0.32));
 
     // knuckle dimple/pad + proximal phalanx
-    const gKnuck = skinPart(sph(r * 1.12), knuckleCol, pi, [0, 0.002, 0], [0, 0, 0], [1, 0.85, 1]);
+    const gKnuck = skinPart(sph(r * 1.12), knuckleCol, pi, [0, 0.002, 0], [0, 0, 0], [1, 0.85, 1], 0.012, 0.25);
     gKnuck.applyMatrix4(mProx);
     skinParts.push(gKnuck);
 
-    const gp = skinPart(capg(r, len * 0.38), skin, pi, [0, 0, -len * 0.21], [Math.PI / 2, 0, 0]);
+    const gp = skinPart(capg(r, len * 0.44), skin, pi, [0, 0, -len * 0.21], [Math.PI / 2, 0, 0], [1, 1, 1], 0.012, 0.25);
     gp.applyMatrix4(mProx);
     skinParts.push(gp);
 
-    // middle phalanx
-    const gm = skinPart(capg(r * 0.93, len * 0.28), skin, mi, [0, 0, -len * 0.16], [Math.PI / 2, 0, 0]);
+    // middle phalanx + seamless joint bridge
+    const gJoint1 = skinPart(sph(r * 0.94), skin, mi, [0, 0, 0], [0, 0, 0], [1, 0.92, 1], 0.01, 0.2);
+    gJoint1.applyMatrix4(mMid);
+    skinParts.push(gJoint1);
+
+    const gm = skinPart(capg(r * 0.93, len * 0.34), skin, mi, [0, 0, -len * 0.16], [Math.PI / 2, 0, 0], [1, 1, 1], 0.012, 0.25);
     gm.applyMatrix4(mMid);
     skinParts.push(gm);
 
-    // distal phalanx + soft pink fingertip pad
-    const gd = skinPart(capg(r * 0.86, len * 0.22), flush, di, [0, 0, -len * 0.13], [Math.PI / 2, 0, 0]);
+    // distal phalanx + joint bridge + soft pink fingertip pad
+    const gJoint2 = skinPart(sph(r * 0.87), skin, di, [0, 0, 0], [0, 0, 0], [1, 0.92, 1], 0.01, 0.2);
+    gJoint2.applyMatrix4(mDist);
+    skinParts.push(gJoint2);
+
+    const gd = skinPart(capg(r * 0.86, len * 0.25), flush, di, [0, 0, -len * 0.13], [Math.PI / 2, 0, 0], [1, 1, 1], 0.012, 0.25);
     gd.applyMatrix4(mDist);
     skinParts.push(gd);
 
     // fingernail (separate glossy nail material)
-    const gn = skinPart(sph(r * 0.62), '#f8e3dc', di, [0, r * 0.68, -len * 0.22], [0, 0, 0], [0.95, 0.28, 1.25], 0.01);
+    const gn = skinPart(sph(r * 0.62), '#f8e3dc', di, [0, r * 0.68, -len * 0.22], [0, 0, 0], [0.95, 0.28, 1.25], 0.008, 0.2);
     gn.applyMatrix4(mDist);
     nailParts.push(gn);
 

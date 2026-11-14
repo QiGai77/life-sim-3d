@@ -329,6 +329,9 @@ svg { display: block; overflow: visible; }
   position: absolute; right: calc(14px + var(--sar)); bottom: calc(12px + var(--sab));
   font-size: 13px; padding: 5px 12px; border-radius: 8px; background: rgba(251, 246, 234, 0.82); border: 1.6px solid var(--ink); pointer-events: none;
 }
+.no-touch #hint { bottom: calc(48px + var(--sab)); }
+.no-touch #speech { bottom: calc(98px + var(--sab)); }
+.no-touch .cutscene #speech { bottom: calc(20px + var(--sab)); }
 .touch #pc-help { display: none; }
 .cutscene #actions, .cutscene #joy { opacity: 0.35; pointer-events: none; }
 

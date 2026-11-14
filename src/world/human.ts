@@ -231,7 +231,6 @@ export class Human {
           sheen: 0.65,
           sheenColor: col.clone().offsetHSL(0, 0, 0.22),
           sheenRoughness: 0.32,
-          anisotropy: 0.35,
         });
       } else if (style.eyes?.includes(name)) {
         m = new THREE.MeshPhysicalMaterial({ color: col, roughness: 0.06, clearcoat: 1.0, clearcoatRoughness: 0.05, envMapIntensity: 1.3 });
