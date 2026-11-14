@@ -597,7 +597,7 @@ export class House {
     // rattle in the crib, by the pillow
     const rt = P.rattle();
     const cp = LAYOUT.crib;
-    this.place(rt, cp.x - 0.18, 0.5, cp.z - 0.32, 0.4);
+    this.place(rt, cp.x + 0.25, 0.5, cp.z - 0.3, 0.4);
     rt.rotation.z = Math.PI / 2 - 0.2;
     this.addI({ id: 'rattle', name: '摇铃', kind: 'hold', obj: rt, bottom: 0.02, radius: 0.09, enabled: true, holdPos: new THREE.Vector3(0.05, -0.12, -0.32), holdRot: new THREE.Euler(0.5, 0, -0.2) });
     this.blob(-1.55, 1.2, 0.36, 0.26, 0.35, 0.02);
