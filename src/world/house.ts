@@ -616,7 +616,7 @@ export class House {
   private tvAcc = 0;
   updateTV(dt: number) {
     const mat = (this.tv.getObjectByName('screen') as THREE.Mesh).material as THREE.MeshStandardMaterial;
-    mat.emissiveIntensity = THREE.MathUtils.damp(mat.emissiveIntensity, this.tvOn ? 1.25 : 0, 6, dt);
+    mat.emissiveIntensity = THREE.MathUtils.damp(mat.emissiveIntensity, this.tvOn ? 2.0 : 0, 6, dt);
     if (!this.tvOn) return;
     this.tvT += dt;
     this.tvAcc += dt;

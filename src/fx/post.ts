@@ -76,8 +76,8 @@ export class Post {
     if (!mobile && !/noao/.test(location.search)) {
       const ao = new GTAOPass(scene, camera, size.x, size.y);
       ao.output = GTAOPass.OUTPUT.Default;
-      ao.blendIntensity = 0.85;
-      ao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.5, thickness: 1.2, scale: 1.0, samples: 12 });
+      ao.blendIntensity = 0.6;
+      ao.updateGtaoMaterial({ radius: 0.25, distanceExponent: 1.5, thickness: 0.8, scale: 1.0, samples: 12 });
       ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 8 });
       this.ao = ao;
       this.composer.addPass(ao);

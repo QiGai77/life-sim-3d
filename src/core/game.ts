@@ -49,6 +49,7 @@ export class Game {
   hover: Interactable | null = null;
   /** head-turn speed (rad/s), used for the rattle */
   lookVel = 0;
+  private lookSeenAt = 0;
   held: Interactable | null = null;
   time = 0;
   playTime = 0;
@@ -365,7 +366,7 @@ export class Game {
   private laugh() {
     sfx.giggle();
     this.hands.setPose('clap', 1.0);
-    this.fun.onLaugh();
+    tweens.wait(0).then(() => this.fun.onLaugh());
     const d = this.parent.pos.distanceTo(_v.set(this.baby.pos.x, 0, this.baby.pos.z));
     const head = this.parent.headWorld(_v2);
     const ndc = head.clone().project(this.baby.camera);
@@ -764,6 +765,7 @@ export class Game {
   private setHover(i: Interactable | null) {
     if (i !== this.hover) {
       this.hover = i;
+      this.lookSeenAt = this.time;
       this.outline.set(i);
       if (i && !i.seen) {
         i.seen = true;
@@ -781,7 +783,7 @@ export class Game {
     } else if (i && i.kind === 'hold' && holding && this.held?.isBlock && i.isBlock) {
       label = `叠上去 · ${i.name}`;
       verb = '叠上';
-    } else if (i && i.kind === 'look' && !holding) label = `看看 · ${i.name}`;
+    } else if (i && i.kind === 'look' && !holding && this.time - this.lookSeenAt < 2.5) label = `看看 · ${i.name}`;
     else if (holding) label = null;
     this.ui.target(label, !!i && i.kind !== 'look');
     this.ui.setGrab(holding, verb);
@@ -1045,6 +1047,7 @@ export class Game {
       this.ui.renderEggs(this.fun.eggs.list);
     }
     if (stage === 'tv') {
+      this.ui.joyLocked(false);
       complete(['star', 'milk', 'hug', 'roll']);
       this.baby.setFloor(new THREE.Vector3(4.6, 0, 1.2), 0);
       this.baby.yaw = Math.PI + 0.25;
@@ -1055,6 +1058,7 @@ export class Game {
       this.dad.idleTimer = 999;
     }
     if (stage === 'mirror') {
+      this.ui.joyLocked(false);
       complete(['star', 'milk', 'hug', 'roll']);
       this.baby.setFloor(new THREE.Vector3(-3.6, 0, 1.5), 0);
       this.baby.yaw = Math.PI;
@@ -1067,6 +1071,7 @@ export class Game {
       (this.fun as any).dadDance();
     }
     if (stage === 'tissues') {
+      this.ui.joyLocked(false);
       complete(['star', 'milk', 'hug', 'roll']);
       this.baby.setFloor(new THREE.Vector3(-1.55, 0, 1.85), 0);
       this.baby.yaw = 0.15;

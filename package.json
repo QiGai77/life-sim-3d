@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "font": "python3 scripts/subset-font.py"
   },
   "repository": {
     "type": "git",
