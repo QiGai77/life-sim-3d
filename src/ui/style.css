@@ -68,9 +68,9 @@ svg { display: block; overflow: visible; }
   border: 2.2px solid var(--ink);
   box-shadow: 0 3px 0 rgba(75, 58, 47, 0.18);
 }
-.need .ring { position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px); transform: rotate(-90deg); }
-.need .ring .track { fill: none; stroke: rgba(75, 58, 47, 0.12); stroke-width: 5; stroke-dasharray: 2 4.5; }
-.need .ring .val { fill: none; stroke-width: 5.5; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; filter: url(#crayon); }
+.need .ring { position: absolute; inset: -7px; width: calc(100% + 14px); height: calc(100% + 14px); transform: rotate(-90deg); }
+.need .ring .track { fill: none; stroke: rgba(251, 246, 234, 0.85); stroke-width: 7; }
+.need .ring .val { fill: none; stroke-width: 6.5; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; filter: url(#ink); }
 .need .ico { position: absolute; inset: 17%; }
 .need .ico svg { width: 100%; height: 100%; }
 .need .lbl {
@@ -121,10 +121,11 @@ svg { display: block; overflow: visible; }
 }
 #hint::before { left: -9px; }
 #hint::after { right: -9px; }
-#hint:empty, .board-open #hint { opacity: 0; }
+#hint:empty, .board-open #hint, .cutscene #hint { opacity: 0; }
+.cutscene #speech { bottom: calc(18px + var(--sab)); }
 
 #speech {
-  position: absolute; left: 50%; top: calc(16% + var(--sat)); transform: translate(-50%, 8px) scale(0.9);
+  position: absolute; left: 50%; bottom: calc(66px + var(--sab)); transform: translate(-50%, 8px) scale(0.9);
   padding: 9px 18px 10px; color: var(--ink); font-size: 16.5px;
   border: 2.2px solid var(--ink); border-radius: 22px 26px 20px 28px / 26px 22px 28px 20px;
   box-shadow: 3px 4px 0 rgba(75, 58, 47, 0.18);
@@ -132,9 +133,9 @@ svg { display: block; overflow: visible; }
   display: flex; align-items: center; gap: 8px;
 }
 #speech::after {
-  content: ''; position: absolute; left: 44%; bottom: -12px; width: 18px; height: 14px;
-  background: inherit; border-right: 2.2px solid var(--ink); border-bottom: 2.2px solid var(--ink);
-  transform: skewX(-30deg) rotate(18deg); border-bottom-right-radius: 6px;
+  content: ''; position: absolute; left: 30%; top: -12px; width: 18px; height: 14px;
+  background: inherit; border-left: 2.2px solid var(--ink); border-top: 2.2px solid var(--ink);
+  transform: skewX(-30deg) rotate(14deg); border-top-left-radius: 6px;
 }
 #speech.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
 #speech .who { font-size: 12.5px; padding: 1px 8px 2px; border-radius: 8px 4px 9px 5px; background: var(--terra); color: #fff8ee; border: 1.6px solid var(--ink); }

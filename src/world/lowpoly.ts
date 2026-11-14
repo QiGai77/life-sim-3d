@@ -364,8 +364,8 @@ export function extrude(shape: THREE.Shape, depth: number, bevel = 0.01): THREE.
     bevelEnabled: bevel > 0,
     bevelThickness: bevel,
     bevelSize: bevel,
-    bevelSegments: 1,
-    curveSegments: 4,
+    bevelSegments: 3,
+    curveSegments: 10,
   });
   g.center();
   return g;

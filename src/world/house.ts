@@ -115,6 +115,13 @@ export class House {
     this.setDayPhase(0);
     this.root.traverse((o) => {
       if (o.userData.occluder) this.occluders.push(o);
+      // perf: tiny props don't need to cast sun shadows (saves shadow-pass draw calls on phones)
+      const m = o as THREE.Mesh;
+      if (m.isMesh && m.castShadow && !(m as THREE.SkinnedMesh).isSkinnedMesh) {
+        if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+        const ws = m.getWorldScale(new THREE.Vector3()).x;
+        if ((m.geometry.boundingSphere?.radius ?? 1) * ws < 0.09) m.castShadow = false;
+      }
     });
   }
 

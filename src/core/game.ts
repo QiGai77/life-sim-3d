@@ -104,7 +104,8 @@ export class Game {
     this.dad.idleTimer = 9;
 
     this.bottle.visible = false;
-    this.bottle.position.set(0.03, -0.1, -0.235);
+    this.bottle.position.set(0.035, -0.115, -0.26);
+    this.bottle.scale.setScalar(0.85);
     this.bottle.rotation.set(2.05, 0, -0.15);
     this.holdAnchor.add(this.bottle);
 
@@ -454,7 +455,7 @@ export class Game {
     const f = new THREE.Vector3(Math.sin(h), 0, Math.cos(h));
     const cam = this.baby.camera;
     const head = this.parent.headWorld(new THREE.Vector3());
-    const camBase = this.parent.pos.clone().addScaledVector(f, 0.5).setY(head.y - 0.24);
+    const camBase = this.parent.pos.clone().addScaledVector(f, 0.38).setY(head.y - 0.28);
     cam.position.copy(camBase);
     cam.lookAt(head);
     const baseQ = cam.quaternion.clone();
@@ -907,6 +908,7 @@ export class Game {
     this.skipRender = false;
   }
   skipRender = false;
+  private shadowFrame = 0;
 
   tick(dt: number) {
     this.time += dt;
@@ -972,6 +974,12 @@ export class Game {
     if (this.state !== 'cutscene') u.sleepy.value = lerp(u.sleepy.value, clamp((30 - this.needs.v.sleep) / 30, 0, 1), 1 - Math.exp(-2 * dt));
     this.updateHint();
     sfx.updateMusic(dt);
+    // phones: refresh the sun shadow map at ~30 Hz instead of every frame
+    if (this.mobile) {
+      this.renderer.shadowMap.autoUpdate = false;
+      this.shadowFrame = (this.shadowFrame + 1) % 2;
+      if (this.shadowFrame === 0 || this.state === 'cutscene') this.renderer.shadowMap.needsUpdate = true;
+    }
     if (!this.skipRender) this.post.render();
   }
 

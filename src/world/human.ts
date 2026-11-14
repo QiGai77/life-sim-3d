@@ -350,17 +350,17 @@ export class Human {
       rotWorld(b['Abdomen'], right, k * 0.18);
     }
 
-    // cradle the baby / reach down for it
+    // cradle the baby (arms low, forearms forward & inward) / reach down for it
     if (o.hold > 0.01 || o.reach > 0.01) {
       const w = o.hold, r = o.reach;
       for (const s of ['L', 'R']) {
         const side = s === 'L' ? 1 : -1;
-        rotWorld(b[`UpperArm${s}`], right, -(w * 0.75 + r * 1.0));
-        rotWorld(b[`UpperArm${s}`], fwd, side * -(w * 0.25 + r * 0.08));
-        rotWorld(b[`LowerArm${s}`], right, -(w * 0.85 + r * 0.3));
-        rotWorld(b[`LowerArm${s}`], up, -side * w * 1.05);
+        rotWorld(b[`UpperArm${s}`], right, -(w * 0.05 + r * 1.0));
+        rotWorld(b[`UpperArm${s}`], fwd, side * -(w * 0.12 + r * 0.08));
+        rotWorld(b[`LowerArm${s}`], right, -(w * 0.3 + r * 0.3));
+        rotWorld(b[`LowerArm${s}`], up, -side * w * 0.45);
       }
-      rotWorld(b['Chest'], right, r * 0.35);
+      rotWorld(b['Chest'], right, r * 0.35 + w * 0.08);
     }
     // silly dance
     if (o.dance > 0.01) {
